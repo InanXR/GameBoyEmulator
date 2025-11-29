@@ -90,8 +90,8 @@ brew install cmake sdl2
 #### Windows
 ```powershell
 # Clone the repository
-git clone https://github.com/InanXR/gb-emulator.git
-cd gb-emulator
+git clone https://github.com/InanXR/GameBoyEmulator.git
+cd GameBoyEmulator
 
 # Configure
 cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=[path-to-vcpkg]/scripts/buildsystems/vcpkg.cmake
@@ -106,8 +106,8 @@ cmake --build build --config Release
 #### Linux
 ```bash
 # Clone the repository
-git clone https://github.com/InanXR/gb-emulator.git
-cd gb-emulator
+git clone https://github.com/InanXR/GameBoyEmulator.git
+cd GameBoyEmulator
 
 # Configure
 cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
@@ -122,8 +122,8 @@ cmake --build build
 #### macOS
 ```bash
 # Clone the repository
-git clone https://github.com/InanXR/gb-emulator.git
-cd gb-emulator
+git clone https://github.com/InanXR/GameBoyEmulator.git
+cd GameBoyEmulator
 
 # Configure
 cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
