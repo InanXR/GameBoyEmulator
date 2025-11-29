@@ -38,6 +38,10 @@ roms/*.gb
 roms/*.gbc
 !roms/.gitkeep
 
+# Release builds
+release/
+*.zip
+
 # Temporary files
 *.tmp
 *.log
