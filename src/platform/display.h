@@ -64,7 +64,6 @@ private:
     SDL_Texture* texture;
     SDL_GameController* controller;
     bool quit;
-    bool fullscreen;
 
     u8 keyboard_mask;   // buttons held on keyboard
     u8 gamepad_mask;   // buttons held on gamepad

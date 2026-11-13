@@ -13,6 +13,7 @@
 #include <fstream>
 #include <string>
 #include <cmath>
+#include <cstdlib>
 
 /**
  * Usage:

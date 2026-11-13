@@ -409,7 +409,7 @@ void CPU::executeOpcode(u8 opcode, MMU& mmu) {
         // 0x40-0x7F: 8-BIT LOAD INSTRUCTIONS (LD r,r)
         // ============================================
         // LD B,r
-        case 0x40: B = B; break;  // LD B,B
+        case 0x40: break;  // LD B,B (no-op)
         case 0x41: B = C; break;  // LD B,C
         case 0x42: B = D; break;  // LD B,D
         case 0x43: B = E; break;  // LD B,E
@@ -420,7 +420,7 @@ void CPU::executeOpcode(u8 opcode, MMU& mmu) {
         
         // LD C,r
         case 0x48: C = B; break;  // LD C,B
-        case 0x49: C = C; break;  // LD C,C
+        case 0x49: break;  // LD C,C (no-op)
         case 0x4A: C = D; break;  // LD C,D
         case 0x4B: C = E; break;  // LD C,E
         case 0x4C: C = H; break;  // LD C,H
@@ -431,7 +431,7 @@ void CPU::executeOpcode(u8 opcode, MMU& mmu) {
         // LD D,r
         case 0x50: D = B; break;  // LD D,B
         case 0x51: D = C; break;  // LD D,C
-        case 0x52: D = D; break;  // LD D,D
+        case 0x52: break;  // LD D,D (no-op)
         case 0x53: D = E; break;  // LD D,E
         case 0x54: D = H; break;  // LD D,H
         case 0x55: D = L; break;  // LD D,L
@@ -442,7 +442,7 @@ void CPU::executeOpcode(u8 opcode, MMU& mmu) {
         case 0x58: E = B; break;  // LD E,B
         case 0x59: E = C; break;  // LD E,C
         case 0x5A: E = D; break;  // LD E,D
-        case 0x5B: E = E; break;  // LD E,E
+        case 0x5B: break;  // LD E,E (no-op)
         case 0x5C: E = H; break;  // LD E,H
         case 0x5D: E = L; break;  // LD E,L
         case 0x5E: E = read8(mmu, getHL()); break;  // LD E,(HL)
@@ -453,7 +453,7 @@ void CPU::executeOpcode(u8 opcode, MMU& mmu) {
         case 0x61: H = C; break;  // LD H,C
         case 0x62: H = D; break;  // LD H,D
         case 0x63: H = E; break;  // LD H,E
-        case 0x64: H = H; break;  // LD H,H
+        case 0x64: break;  // LD H,H (no-op)
         case 0x65: H = L; break;  // LD H,L
         case 0x66: H = read8(mmu, getHL()); break;  // LD H,(HL)
         case 0x67: H = A; break;  // LD H,A
@@ -464,7 +464,7 @@ void CPU::executeOpcode(u8 opcode, MMU& mmu) {
         case 0x6A: L = D; break;  // LD L,D
         case 0x6B: L = E; break;  // LD L,E
         case 0x6C: L = H; break;  // LD L,H
-        case 0x6D: L = L; break;  // LD L,L
+        case 0x6D: break;  // LD L,L (no-op)
         case 0x6E: L = read8(mmu, getHL()); break;  // LD L,(HL)
         case 0x6F: L = A; break;  // LD L,A
         
@@ -485,7 +485,7 @@ void CPU::executeOpcode(u8 opcode, MMU& mmu) {
         case 0x7C: A = H; break;  // LD A,H
         case 0x7D: A = L; break;  // LD A,L
         case 0x7E: A = read8(mmu, getHL()); break;  // LD A,(HL)
-        case 0x7F: A = A; break;  // LD A,A
+        case 0x7F: break;  // LD A,A (no-op)
         
         // ============================================
         // 0x80-0xBF: ALU OPERATIONS

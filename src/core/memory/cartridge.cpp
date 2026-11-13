@@ -3,6 +3,7 @@
 #include <stdexcept>
 #include <iostream>
 #include <algorithm>
+#include <memory>
 
 /**
  * Cartridge Implementation

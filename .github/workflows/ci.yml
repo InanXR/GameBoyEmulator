@@ -16,7 +16,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install dependencies (Ubuntu)
         if: runner.os == 'Linux'
@@ -33,9 +33,12 @@ jobs:
         shell: pwsh
         run: |
           git clone --depth 1 https://github.com/microsoft/vcpkg ${{ github.workspace }}/vcpkg
-          ${{ github.workspace }}/vcpkg/bootstrap-vcpkg.bat
-          ${{ github.workspace }}/vcpkg/vcpkg install sdl2:x64-windows
-          echo "CMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" >> $env:GITHUB_ENV
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & ${{ github.workspace }}/vcpkg/bootstrap-vcpkg.bat
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & ${{ github.workspace }}/vcpkg/vcpkg install sdl2:x64-windows
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "CMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" >> $env:GITHUB_ENV
 
       - name: Configure (Windows)
         if: runner.os == 'Windows'
@@ -46,8 +49,27 @@ jobs:
         if: runner.os != 'Windows'
         run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
 
+      # Build with diagnostics: on failure, the offending log lines are
+      # surfaced as job annotations (readable without downloading logs)
+      # and into the step summary.
       - name: Build
-        run: cmake --build build --config Release
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build build --config Release 2>&1 | tee build.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            {
+              echo "## Build failed (exit $rc)"
+              echo '```'
+              grep -iE 'error|fatal' build.log | sort -u | head -30 || true
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY" || true
+            grep -iE 'error|fatal' build.log | sort -u | head -30 | while IFS= read -r line; do
+              printf '::error::%s\n' "${line:0:180}"
+            done
+          fi
+          exit "$rc"
 
       - name: Unit tests
         if: runner.os != 'Windows'
@@ -57,21 +79,38 @@ jobs:
     name: Emulation accuracy tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libsdl2-dev python3-pip
-          pip install --user Pillow
+          sudo apt-get install -y libsdl2-dev python3-pil
+          # python3-pil via apt: no pip, no PEP 668 externally-managed issues
 
       - name: Build
+        shell: bash
         run: |
-          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
-          cmake --build build
+          set -o pipefail
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release 2>&1 | tee configure.log
+          cfg_rc=${PIPESTATUS[0]}
+          if [ "$cfg_rc" -ne 0 ]; then
+            grep -iE 'error|fatal' configure.log | sort -u | head -30 | while IFS= read -r line; do
+              printf '::error::%s\n' "${line:0:180}"
+            done
+            exit "$cfg_rc"
+          fi
+          cmake --build build 2>&1 | tee build.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            grep -iE 'error|fatal' build.log | sort -u | head -30 | while IFS= read -r line; do
+              printf '::error::%s\n' "${line:0:180}"
+            done
+          fi
+          exit "$rc"
 
       - name: Unit tests
         run: ctest --test-dir build --output-on-failure
 
       - name: Run accuracy test suite
+        shell: bash
         run: bash tests/run_tests.sh
