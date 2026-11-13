@@ -20,26 +20,28 @@
  *   gameboy <rom.gb> [options]
  *
  * Options:
- *   --headless N     Run N frames without a window/audio (for testing)
- *   --screenshot F   In headless mode: write the final framebuffer to F (PPM)
- *   --scale N        Window scale factor (1-8, default 4)
+ *   --dmg           Force DMG mode (ignore the cartridge's CGB flag)
+ *   --headless N    Run N frames without a window/audio (for testing)
+ *   --screenshot F  In headless mode: write the final framebuffer to F (PPM)
+ *   --scale N       Window scale factor (1-8, default 4)
  */
 
 static void printHeader() {
     std::cout << "\n"
               << "  ============================================\n"
               << "     GameBoy Emulator - C++17 + SDL2\n"
-              << "     Sharp LR35902 CPU Emulation\n"
+              << "     Sharp LR35902 CPU / DMG + CGB emulation\n"
               << "     Built by Inan - 2026\n"
               << "  ============================================\n\n";
 }
 
 static void printUsage(const char* prog) {
-    std::cerr << "Usage: " << prog << " <rom.gb> [--headless N] [--screenshot file.ppm] "
-              << "[--scale N]\n";
-    std::cerr << "  --headless N    run N frames without a window (testing)\n";
-    std::cerr << "  --screenshot F  headless: dump final framebuffer as PPM\n";
-    std::cerr << "  --scale N       window scale 1-8 (default 4)\n";
+    std::cerr << "Usage: " << prog << " <rom.gb> [--dmg] [--headless N] "
+              << "[--screenshot file.ppm] [--scale N]\n";
+    std::cerr << "  --dmg          force DMG mode (ignore the CGB header flag)\n";
+    std::cerr << "  --headless N   run N frames without a window (testing)\n";
+    std::cerr << "  --screenshot F headless: dump final framebuffer as PPM\n";
+    std::cerr << "  --scale N      window scale 1-8 (default 4)\n";
 }
 
 static void printControls() {
@@ -52,19 +54,30 @@ static void printControls() {
     std::cout << "  M Mute   +/- Volume   ESC Quit" << std::endl;
 }
 
-// Writes a 160x144 PPM (P6) using the DMG green palette.
+// Writes a 160x144 PPM (P6). DMG games use the green palette; CGB
+// games output RGB555 colors expanded with (v << 3) | (v >> 2).
 static bool writeScreenshot(const std::string& path,
-                            const std::array<u8, 160 * 144>& fb) {
+                            const std::array<u16, 160 * 144>& fb,
+                            bool cgb_mode) {
     static const u8 PALETTE[4][3] = {
         {224, 248, 208}, {136, 192, 112}, {52, 104, 86}, {8, 24, 32}
     };
     std::ofstream out(path, std::ios::binary);
     if (!out) return false;
     out << "P6\n160 144\n255\n";
+    auto conv = [](u16 v5) -> u8 {
+        return static_cast<u8>((v5 << 3) | (v5 >> 2));
+    };
     for (int y = 0; y < 144; y++) {
         for (int x = 0; x < 160; x++) {
-            u8 shade = fb[static_cast<size_t>(y) * 160 + x] & 3;
-            out.write(reinterpret_cast<const char*>(PALETTE[shade]), 3);
+            u16 px = fb[static_cast<size_t>(y) * 160 + x];
+            if (cgb_mode) {
+                u8 rgb[3] = {conv(px & 0x1F), conv((px >> 5) & 0x1F),
+                             conv((px >> 10) & 0x1F)};
+                out.write(reinterpret_cast<const char*>(rgb), 3);
+            } else {
+                out.write(reinterpret_cast<const char*>(PALETTE[px & 3]), 3);
+            }
         }
     }
     return static_cast<bool>(out);
@@ -110,7 +123,7 @@ static void handleHotkeys(Emulator& emu, Display& display, bool& paused) {
             }
             case Display::Hotkey::Screenshot: {
                 std::string path = emu.siblingPath(".ppm");
-                if (writeScreenshot(path, emu.framebuffer())) {
+                if (writeScreenshot(path, emu.framebuffer(), emu.isCGB())) {
                     std::cout << "Screenshot saved: " << path << std::endl;
                 }
                 break;
@@ -163,7 +176,7 @@ static int runWindowed(Emulator& emu, int scale) {
         jp.setButton(Joypad::BTN_SELECT, (mask & Joypad::BTN_SELECT) != 0);
 
         if (paused) {
-            display.render(emu.framebuffer());
+            display.render(emu.framebuffer(), emu.isCGB());
             SDL_Delay(16);
             continue;
         }
@@ -175,7 +188,7 @@ static int runWindowed(Emulator& emu, int scale) {
             emu.runFrame();
         }
 
-        display.render(emu.framebuffer());
+        display.render(emu.framebuffer(), emu.isCGB());
 
         // Fallback pacing when vsync is unavailable/disabled
         Uint64 now = SDL_GetPerformanceCounter();
@@ -207,6 +220,7 @@ int main(int argc, char* argv[]) {
     int headless_frames = -1;
     std::string screenshotPath;
     int scale = 4;
+    bool force_dmg = false;
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -219,6 +233,8 @@ int main(int argc, char* argv[]) {
             scale = std::atoi(argv[++i]);
             if (scale < 1) scale = 1;
             if (scale > 8) scale = 8;
+        } else if (arg == "--dmg") {
+            force_dmg = true;
         } else if (arg == "--help" || arg == "-h") {
             printUsage(argv[0]);
             return 0;
@@ -242,7 +258,7 @@ int main(int argc, char* argv[]) {
     }
 
     Emulator emulator;
-    if (!emulator.loadROM(romPath)) {
+    if (!emulator.loadROM(romPath, force_dmg)) {
         return 1;
     }
 
@@ -251,7 +267,8 @@ int main(int argc, char* argv[]) {
         // from the ROM (e.g. blargg test results) is echoed to stdout.
         emulator.runHeadless(headless_frames);
         if (!screenshotPath.empty()) {
-            if (!writeScreenshot(screenshotPath, emulator.framebuffer())) {
+            if (!writeScreenshot(screenshotPath, emulator.framebuffer(),
+                                 emulator.isCGB())) {
                 std::cerr << "Failed to write screenshot: " << screenshotPath << std::endl;
             }
         }

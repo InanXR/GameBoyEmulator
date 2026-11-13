@@ -40,7 +40,7 @@ public:
     ~Display();
 
     bool init();
-    void render(const std::array<u8, 160 * 144>& framebuffer);
+    void render(const std::array<u16, 160 * 144>& framebuffer, bool cgb_mode);
 
     // Pumps the SDL event queue; updates button state and hotkeys.
     void poll();

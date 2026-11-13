@@ -111,9 +111,11 @@ The single most important architectural decision in this codebase:
 
    ```cpp
    cpu.setCycleHook([this] {
-       ppu.tick(mmu);                 // 4 T-cycles of PPU
-       mmu.getTimer().tick(1, mmu);   // 4 T-cycles of timer
-       mmu.getAPU().tick(1);          // 4 T-cycles of APU
+       ppu.tick(mmu);                        // 4 dots (2 in CGB double speed)
+       if (!cpu.stopped) {
+           mmu.getTimer().tick(1, mmu);      // 4 T-cycles of timer
+       }                                     // (frozen while in STOP)
+       mmu.getAPU().tickT(mmu.isDoubleSpeed() ? 2 : 4);  // base T-cycles of APU
    });
    ```
 
@@ -124,6 +126,14 @@ The single most important architectural decision in this codebase:
    - while HALT/STOP sleeping (4 T-cycles per step).
 
 3. Nothing else ticks the components during normal execution.
+
+The timer advances its system counter 4 T-cycles per M-cycle in both
+speed modes: in CGB double speed the CPU consumes M-cycles twice as
+fast, so DIV and TIMA frequencies double exactly like the hardware's,
+with no changes to the timer circuit itself. The PPU dot clock and the
+APU stay in the 4.19 MHz domain, hence the 2-dot and 2-T-cycle hook
+adjustments. While the CPU sleeps in STOP, the system counter is
+frozen (DIV stops on both models).
 
 ### 3.2 Why it matters
 
@@ -144,10 +154,12 @@ does not pass — see [05-Accuracy §3](05-ACCURACY.md#3-known-limitations).
 
 ## 4. Main Loop & Frame Pacing
 
-One frame is exactly 70224 T-cycles (154 scanlines × 456):
+One frame is always 70224 PPU dots (154 scanlines × 456). In normal
+speed one dot costs one CPU T-cycle; in CGB double speed two:
 
 ```cpp
-while (frame_cycles < 70224) {
+const u32 frame_budget = mmu.isDoubleSpeed() ? 70224 * 2 : 70224;
+while (frame_cycles < frame_budget) {
     u32 before = cpu.cycles;
     cpu.step(mmu);                       // components tick via the hook
     frame_cycles += cpu.cycles - before;

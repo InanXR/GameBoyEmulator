@@ -18,7 +18,8 @@ What is verified, how, and where the known limits are.
 | blargg `instr_timing` | Per-opcode M-cycle timing | **pass** | `tests/run_tests.sh` |
 | `dmg-acid2` | PPU rendering (window, sprite priority, STAT choreography) | **pixel-perfect** (0/23040 px differ) | `tests/run_tests.sh` |
 | `halt_bug.gb` | HALT-bug trigger matrix over IE/IF | runs to completion; matrix matches hardware expectations | `tests/run_tests.sh` (INFO) |
-| Unit tests | Timer edges, CPU flags, serial, joypad, save states | **30/30 pass** | `ctest` |
+| `cgb-acid2` | CGB PPU rendering (palettes, attributes, banks, priority, HDMA) | **pixel-perfect** (0/23040 px, exact RGB) | `tests/run_tests.sh` |
+| Unit tests | Timer edges, CPU flags, serial, joypad, CGB registers/banking/HDMA/speed, save states | **99/99 pass** | `ctest` |
 | blargg `mem_timing-2` | T-cycle-precise memory access timing | **not passing** (see §3.1) | manual |
 | blargg `dmg_sound` / `cgb_sound` | APU register-level behavior | not run | — |
 | Blargg `oam_bug` | OAM corruption bug | not implemented, not run | — |
@@ -90,12 +91,14 @@ be the next big step.
 
 1. **`mem_timing-2`** does not pass (see §2.5) — sub-M-cycle DIV phase
    is not modeled.
-2. **No CGB support** — the emulator is DMG-only; CGB-flagged ROMs run
-   in DMG compatibility mode.
-3. **No link cable** — the serial port is loopback-to-host only
+2. **CGB DMA billing** — GDMA and HBlank DMA transfers are
+   instantaneous; hardware stalls the CPU ~8 M-cycles per 16-byte
+   block. Data placement, readback and completion flags are correct,
+   but the CPU is not charged the transfer time.
+3. **DMG STOP LCD-off** — hardware blanks the LCD during STOP; the
+   emulator keeps rendering (the DIV freeze is emulated).
+4. **No link cable** — the serial port is loopback-to-host only
    (sufficient for test ROMs; no Game Link network play).
-4. **STOP** parks the CPU until a joypad press but does not freeze the
-   system counter (DIV) as hardware does.
 5. **OAM corruption bug** (writing OAM during mode 1/2 corrupts
    sprite data on real DMG) is not emulated — writes simply take
    effect.

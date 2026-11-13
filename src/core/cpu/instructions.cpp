@@ -110,10 +110,11 @@ void CPU::executeOpcode(u8 opcode, MMU& mmu) {
             RRCA();
             break;
         
-        // 0x10: STOP
+        // 0x10: STOP (low-power sleep, or CGB speed switch when KEY1
+        // bit 0 was armed; the byte after the opcode is skipped)
         case 0x10:
-            STOP();
-            PC++;  // STOP is 2-byte instruction
+            STOP(mmu);
+            PC++;
             break;
         
         // 0x11: LD DE,nn

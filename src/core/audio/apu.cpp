@@ -116,8 +116,10 @@ bool APU::pulseDAC(const Pulse& ch, int nr2_off) const {
 // ============================================
 
 void APU::tick(int m_cycles) {
-    int t_cycles = m_cycles * 4;
+    tickT(m_cycles * 4);
+}
 
+void APU::tickT(int t_cycles) {
     if (powered) {
         // Frame sequencer (512 Hz, 8192 T-cycles per step)
         fs_counter += t_cycles;
@@ -138,6 +140,45 @@ void APU::tick(int m_cycles) {
         sample_accum -= t_cycles_per_sample;
         generateSample();
     }
+}
+
+// Raw digital output (0-15) of one generation circuit, as tapped by
+// the CGB's PCM12/PCM34 debug registers.
+int APU::channelDigital(int ch) const {
+    auto pulseOut = [this](const Pulse& c, int nr1_off) -> int {
+        if (!c.enabled) return 0;
+        u8 duty = (regs[nr1_off - 0x10] >> 6) & 0x03;
+        return (DUTY_TABLE[duty] >> (7 - c.duty_pos)) & 1 ? c.volume : 0;
+    };
+    switch (ch) {
+        case 1:
+            return pulseOut(ch1, 0x11);
+        case 2:
+            return pulseOut(ch2, 0x16);
+        case 3: {
+            if (!wave.enabled) return 0;
+            u8 level = (regs[0x0C] >> 5) & 0x03;
+            switch (level) {
+                case 0: return 0;
+                case 1: return wave.sample_buffer;
+                case 2: return wave.sample_buffer >> 1;
+                default: return wave.sample_buffer >> 2;
+            }
+        }
+        default:
+            if (!noise.enabled) return 0;
+            return (noise.lfsr & 1) ? noise.volume : 0;
+    }
+}
+
+// PCM12 ($FF76): low nibble = CH1 output, high nibble = CH2 output.
+u8 APU::pcm12() const {
+    return static_cast<u8>((channelDigital(2) << 4) | (channelDigital(1) & 0x0F));
+}
+
+// PCM34 ($FF77): low nibble = CH3 output, high nibble = CH4 output.
+u8 APU::pcm34() const {
+    return static_cast<u8>((channelDigital(4) << 4) | (channelDigital(3) & 0x0F));
 }
 
 void APU::tickPulse(Pulse& ch, int nr1_off, int nr4_off, int t_cycles) {

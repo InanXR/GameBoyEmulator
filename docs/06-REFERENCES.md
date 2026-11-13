@@ -38,6 +38,7 @@ Specific Pan Docs chapters that shaped the implementation:
 |---|---|---|
 | blargg `cpu_instrs` (individual 01–11), `instr_timing`, `halt_bug.gb` | <https://github.com/retrio/gb-test-roms> | Freely redistributable test ROMs (Shay Green / retrio mirror) |
 | `dmg-acid2` + reference image | <https://github.com/mattcurrie/dmg-acid2> | MIT; the reference-dmg.png is the pixel-exact target the suite compares against |
+| `cgb-acid2` + reference image | <https://github.com/mattcurrie/cgb-acid2> | MIT; the reference.png is the exact-RGB target the CGB suite compares against |
 
 The test suite downloads these on demand; nothing copyrighted is ever
 committed to this repository.

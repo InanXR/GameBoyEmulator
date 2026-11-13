@@ -90,23 +90,42 @@ bool Display::init() {
     return true;
 }
 
-void Display::render(const std::array<u8, 160 * 144>& framebuffer) {
-    // Classic DMG green palette
-    static const u8 palette[4][3] = {
-        {224, 248, 208},
-        {136, 192, 112},
-        { 52, 104,  86},
-        {  8,  24,  32}
-    };
-
+void Display::render(const std::array<u16, 160 * 144>& framebuffer, bool cgb_mode) {
     static u8 pixels[GB_HEIGHT][GB_WIDTH][3];
 
-    for (int y = 0; y < GB_HEIGHT; y++) {
-        for (int x = 0; x < GB_WIDTH; x++) {
-            u8 shade = framebuffer[static_cast<size_t>(y) * GB_WIDTH + x] & 0x03;
-            pixels[y][x][0] = palette[shade][0];
-            pixels[y][x][1] = palette[shade][1];
-            pixels[y][x][2] = palette[shade][2];
+    if (cgb_mode) {
+        // CGB: framebuffer holds RGB555 colors (R bits 0-4, G bits
+        // 5-9, B bits 10-14). Expand each 5-bit component to 8 bits
+        // with (v << 3) | (v >> 2), the conversion the cgb-acid2
+        // reference image is generated with.
+        for (int y = 0; y < GB_HEIGHT; y++) {
+            for (int x = 0; x < GB_WIDTH; x++) {
+                u16 c = framebuffer[static_cast<size_t>(y) * GB_WIDTH + x];
+                auto conv = [](u16 v5) -> u8 {
+                    return static_cast<u8>((v5 << 3) | (v5 >> 2));
+                };
+                pixels[y][x][0] = conv(c & 0x1F);
+                pixels[y][x][1] = conv((c >> 5) & 0x1F);
+                pixels[y][x][2] = conv((c >> 10) & 0x1F);
+            }
+        }
+    } else {
+        // DMG: framebuffer holds palette shades 0-3; show the classic
+        // green palette.
+        static const u8 palette[4][3] = {
+            {224, 248, 208},
+            {136, 192, 112},
+            { 52, 104,  86},
+            {  8,  24,  32}
+        };
+
+        for (int y = 0; y < GB_HEIGHT; y++) {
+            for (int x = 0; x < GB_WIDTH; x++) {
+                u8 shade = framebuffer[static_cast<size_t>(y) * GB_WIDTH + x] & 0x03;
+                pixels[y][x][0] = palette[shade][0];
+                pixels[y][x][1] = palette[shade][1];
+                pixels[y][x][2] = palette[shade][2];
+            }
         }
     }
 

@@ -1,7 +1,7 @@
 # 03 — Hardware Notes
 
-The DMG hardware behaviors this emulator implements, subsystem by
-subsystem, with the reasoning behind each. Terminology follows
+The DMG and CGB hardware behaviors this emulator implements, subsystem
+by subsystem, with the reasoning behind each. Terminology follows
 [Pan Docs](https://gbdev.io/pandocs/).
 
 **Contents**
@@ -16,6 +16,7 @@ subsystem, with the reasoning behind each. Terminology follows
 8. [Cartridges & MBCs](#8-cartridges--mbcs)
 9. [Serial Port](#9-serial-port)
 10. [Power-On State](#10-power-on-state)
+11. [Game Boy Color (CGB)](#11-game-boy-color-cgb)
 
 ---
 
@@ -86,9 +87,21 @@ is verified by the `halt_bug.gb` survey ROM (see
 
 ### 3.3 STOP
 STOP parks the CPU until a joypad press sets IF bit 4; the second byte
-of the instruction is skipped. On DMG, STOP also freezes the system
-counter — **not** emulated (no known game depends on it; documented as
-a limitation).
+of the instruction is skipped. While stopped, the **system counter is
+frozen**: the emulator's M-cycle hook skips timer ticks, so DIV and
+TIMA stop advancing on both models (Pan Docs: the system counter
+increments every M-cycle "unless the CPU is in STOP mode").
+
+On CGB, STOP after writing 1 to KEY1 ($FF4D bit 0) is the documented
+speed-switch sequence: the CPU pauses ~2050 M-cycles with the clock
+frozen, then the CPU/timer/serial/OAM-DMA domain doubles while the PPU
+and APU keep their 4.19 MHz timing. The switch is consumed exactly
+once and KEY1 bit 0 clears automatically. On DMG there is no KEY1 and
+STOP never switches speed.
+
+Hardware nuance not emulated: on DMG the LCD turns off during STOP
+(and the screen state during the CGB switch pause depends on the PPU
+mode the switch started in); the emulator keeps rendering.
 
 ## 4. Timer
 
@@ -277,18 +290,87 @@ written on exit/savestate.
 
 ## 9. Serial Port
 
-Writing SC with bit 7 set performs an instant transfer with no peer
-connected: the byte in SB is delivered to the host (stdout in
-headless mode; test ROMs print their results this way), SB reads back
-the shifted-in 0xFF, SC's start bit clears, and the serial interrupt
-is requested — matching what a link-less DMG does.
+Writing SC with bit 7 set and the internal clock selected (SC bit 0)
+performs an instant transfer with no peer connected: the byte in SB is
+delivered to the host (stdout in headless mode; test ROMs print their
+results this way), SB reads back the shifted-in 0xFF, SC's start bit
+clears, and the serial interrupt is requested — matching what a
+link-less DMG does with the standard `SC=$81` idiom. With the
+external clock selected (SC bit 0 clear) the transfer never completes,
+like a slave Game Boy waiting for a master that is not there. On CGB,
+SC bit 1 (fast clock) is preserved through the transfer.
 
 ## 10. Power-On State
 
-The emulator starts in the documented post-boot state: CPU registers
-`A=01 F=B0 B=00 C=13 D=00 E=D8 H=01 L=4D SP=FFFE PC=0100`, `DIV=0xAB`,
-`IF=0xE1` (VBlank pending), `LCDC=0x91`, `STAT=0x85`, and the DMG audio
-register power-on values. No boot ROM is executed.
+The emulator starts in the documented post-boot state. DMG: CPU
+registers `A=01 F=B0 B=00 C=13 D=00 E=D8 H=01 L=4D SP=FFFE PC=0100`,
+`DIV=0xAB`, `IF=0xE1` (VBlank pending), `LCDC=0x91`, `STAT=0x85`, and
+the DMG audio register power-on values. CGB (cartridge header flag
+$0143 has bit 7 set, or the `--dmg` flag is absent): CPU registers
+`A=11 F=80 B=00 C=00 D=FF E=56 H=00 L=0D SP=FFFE PC=0100`, `SC=$7F`,
+`DMA=$00`, `KEY1=$7E`, `VBK=$FE`, `HDMA1-5=$FF`, `RP=$3E`, `SVBK=$F8`,
+and background palette RAM initialized to white ($FF bytes; bit 15 of
+each RGB555 color is ignored). Object palette RAM is uninitialized on
+hardware; the emulator fills it with $FF deterministically. No boot ROM
+is executed.
+
+## 11. Game Boy Color (CGB)
+
+Cartridges flagged CGB ($0143 = $80 dual or $C0 CGB-only) boot with the
+CGB register file active; everything else boots as a DMG and the CGB
+registers read $FF and ignore writes. `--dmg` forces DMG mode.
+
+**VRAM banking (VBK $FF4F)** — 16 KiB VRAM in two 8 KiB banks. CPU
+accesses at 8000-9FFF go through the selected bank; rendering fetches
+tile data from either bank (BG map attribute bit 3 for the background,
+OAM attribute bit 3 for sprites) and BG map attributes from bank 1 at
+the same addresses as the tile-number map in bank 0.
+
+**BG map attributes (VRAM bank 1)** — per tile: palette (bits 0-2),
+VRAM bank (bit 3), X flip (bit 5), Y flip (bit 6), BG-over-OBJ
+priority (bit 7). Bit 4 is readable/writable but ignored by hardware.
+
+**WRAM banking (SVBK $FF70)** — 32 KiB WRAM in eight 4 KiB banks;
+bank 0 stays at C000-CFFF, banks 1-7 map at D000-DFFF (writing 0
+selects bank 1), echo region included.
+
+**Palette RAM (BGPI/BGPD $FF68-69, OBPI/OBPD $FF6A-6B)** — 64 bytes
+per palette bank, two little-endian bytes per RGB555 color. Writes
+auto-increment the 6-bit index (wrapping 63 to 0) when BGPI/OBPI bit 7
+is set — even when the write is blocked by the mode-3 CRAM lock;
+reads never auto-increment. While the PPU reads palette RAM (mode 3),
+reads return $FF and writes are dropped.
+
+**BG/OBJ priority** — three flags decide each pixel (Pan Docs):
+BG color index 0 always lets the OBJ through; LCDC bit 0 clear (CGB
+meaning) makes OBJs win unconditionally; otherwise the OBJ wins only
+if neither its OAM attribute bit 7 nor the tile's BG attribute bit 7
+requests BG priority. Sprite-vs-sprite priority uses OAM index order
+in CGB mode (X order when OPRI $FF6C bit 0 selects DMG style).
+
+**HDMA/GDMA (HDMA1-5 $FF51-55)** — source 0000-DFF0 and destination
+8000-9FF0, both nibble-aligned by masking on write. HDMA5 bit 6-0
+length = blocks-1. GDMA (bit 7 clear on write) copies everything at
+once; HBlank DMA (bit 7 set) moves one 16-byte block per HBlank of
+lines 0-143 (never during VBlank), tracks the remaining length in the
+FF55 readback (bit 7 clear = active), and writing bit 7 clear to FF55
+cancels it while keeping the length readable. Destination overflow
+stops the transfer prematurely. The VRAM destination bank is latched
+at transfer start. Caveat: transfers are instantaneous here — the CPU
+is not billed the hardware's ~8 M-cycles per block (see
+[05-Accuracy §3](05-ACCURACY.md)).
+
+**Double speed (KEY1 $FF4D)** — write bit 0, then STOP (see §3.3).
+After the switch the CPU consumes M-cycles twice as fast; the PPU
+advances 2 dots per M-cycle instead of 4 and the APU is ticked 2 base
+T-cycles per M-cycle instead of 4, so video and audio timing are
+unaffected. The timer's system counter still advances 4 T-cycles per
+M-cycle, so DIV and TIMA frequencies double exactly as on hardware.
+
+**Registers** — RP $FF56 (infrared; no IR hardware, so "receiving"
+reads 1), PCM12/PCM34 $FF76-77 (live APU channel digital outputs,
+low nibble = odd channel), KEY0 $FF4C and the undocumented $FF72-75
+are readable/writable storage.
 
 ---
 *Next: [04 — Testing](04-TESTING.md)*

@@ -59,6 +59,11 @@ public:
     bool ime;      // Interrupt Master Enable flag
     bool ime_scheduled;  // IME enable scheduled (EI 1-instruction delay)
     bool halt_bug;       // HALT failed: PC fails to increment once
+
+    // STOP state: either a low-power sleep (woken by a joypad press)
+    // or, on CGB with KEY1 armed, the ~2050 M-cycle speed-switch pause.
+    bool stop_speed_switch;
+    u16  stop_pause;      // M-cycles left in the speed-switch pause
     
     // Cycle counting for timing
     u32 cycles;
@@ -80,10 +85,7 @@ public:
     CPU();
     
     // Reset CPU to initial state (post-BIOS)
-    void reset();
-
-    // Reset timer to the power-on state (DIV reads 0xAB after boot).
-    void powerOn();
+    void reset(bool cgb_mode = false);
     
     // Execute one instruction
     void step(MMU& mmu);
@@ -170,7 +172,7 @@ private:
     // Control
     void NOP();
     void HALT(MMU& mmu);
-    void STOP();
+    void STOP(MMU& mmu);
     void DI();
     void EI();
     

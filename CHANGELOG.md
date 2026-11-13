@@ -4,6 +4,73 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [3.0.0] — 2026-11-13
+
+Full Game Boy Color support, verified pixel-perfect against the
+cgb-acid2 reference test, plus the first accurate STOP emulation.
+
+### Added
+
+- **Game Boy Color hardware model.** Cartridges flagged CGB in the
+  header ($0143 = $80/$C0) boot as a CGB with the correct post-boot
+  register state (A=$11, SC=$7F, KEY1=$7E, VBK=$FE, HDMA1-5=$FF,
+  RP=$3E, SVBK=$F8, BG palette RAM initialized to white); `--dmg`
+  forces DMG mode for any ROM. In DMG mode the CGB registers read
+  $FF and ignore writes.
+- **Color palettes**: 8 background + 8 object palettes in palette RAM
+  (RGB555) through BGPI/BGPD and OBPI/OBPD with write auto-increment
+  (wrapping, running even when the write is blocked) and the mode-3
+  CRAM lock (reads $FF, writes dropped).
+- **VRAM banking** (VBK $FF4F): 16 KiB across two banks; BG map
+  attributes in bank 1 (palette, tile bank, X/Y flips, BG-over-OBJ
+  priority); sprite tile banks via OAM attribute bit 3.
+- **WRAM banking** (SVBK $FF70): 32 KiB across eight banks, bank 0
+  fixed at C000, writing 0 selects bank 1, echo region included.
+- **HDMA/GDMA** (HDMA1-5 $FF51-55): general-purpose and HBlank VRAM
+  DMA with nibble-masked addresses, FF55 readback (bit 7 = active),
+  cancel-keeps-length semantics, destination-overflow stop, and the
+  VRAM destination bank latched at transfer start.
+- **Double-speed mode** (KEY1 $FF4D + STOP): the documented
+  arm-then-STOP sequence with the ~2050 M-cycle hardware pause; CPU,
+  timer/DIV, serial and OAM DMA run at double rate while the PPU (2
+  dots per M-cycle) and APU (ticked in base T-cycles) keep their
+  4.19 MHz timing.
+- **CGB priority rules**: LCDC bit 0 as BG/OBJ master-priority flag,
+  per-pixel resolution honoring the OAM priority flag, BG attribute
+  priority and BG color 0 (Pan Docs table); OAM-index sprite priority
+  in CGB mode, DMG-style X priority via OPRI.
+- **CGB register file**: RP infrared port, PCM12/PCM34 live APU
+  channel outputs, KEY0, OPRI, undocumented $FF72-75.
+- **cgb-acid2** added to the accuracy suite (14 tests total) with an
+  exact-RGB pixel comparison; rendered pixel-perfect.
+- 69 new unit checks (99 total) covering CGB boot state, VRAM/WRAM
+  banking, palette RAM auto-increment and locking, GDMA and HBlank
+  DMA, the speed switch, and CGB save states.
+
+### Changed
+
+- **STOP now freezes the system counter (DIV) on both models** while
+  the CPU sleeps (previously documented as not emulated); waking on a
+  joypad press is unchanged.
+- Framebuffer is now RGB555 (DMG stores palette shades 0-3); the
+  frontend and screenshots convert CGB colors with (v << 3) | (v >> 2)
+  and DMG shades with the green palette.
+- Save states are version 3 (v2 states are rejected cleanly); the
+  format adds the hardware mode, speed, banks, palette RAM and HDMA
+  state.
+- Serial: transfers only complete with the internal clock selected
+  (SC bit 0), matching slave-mode behavior; SC bit 1 (CGB fast clock)
+  is preserved.
+- The frame budget doubles to 140448 CPU T-cycles in double-speed
+  mode (a PPU frame is always 70224 dots).
+
+### Fixed
+
+- DMG-only timer quirk: disabling the timer while the TAC-selected
+  bit reads 1 sends one final TIMA increment (does not happen on CGB).
+- SC write storage masked the internal-clock bit out on DMG, and the
+  boot SC value now reads back $7E as documented.
+
 ## [2.0.0] — 2026-11-13
 
 Accuracy-first overhaul of the 2025 codebase: every blargg CPU test now

@@ -11,16 +11,30 @@ CPU::CPU() {
     reset();
 }
 
-void CPU::reset() {
-    // GameBoy initial state after BIOS execution
-    A = 0x01;   // GameBoy model identifier
-    F = 0xB0;   // Flags: Z=1, N=0, H=1, C=1
-    B = 0x00;
-    C = 0x13;
-    D = 0x00;
-    E = 0xD8;
-    H = 0x01;
-    L = 0x4D;
+void CPU::reset(bool cgb_mode) {
+    // Register state right after the boot ROM hands control to the
+    // cartridge (Pan Docs: Power-Up Sequence). DMG and CGB boot ROMs
+    // leave different values; A is the model identifier ($01 DMG,
+    // $11 CGB).
+    if (cgb_mode) {
+        A = 0x11;
+        F = 0x80;   // Z=1, N=0, H=0, C=0
+        B = 0x00;
+        C = 0x00;
+        D = 0xFF;
+        E = 0x56;
+        H = 0x00;
+        L = 0x0D;
+    } else {
+        A = 0x01;   // GameBoy model identifier
+        F = 0xB0;   // Flags: Z=1, N=0, H=1, C=1
+        B = 0x00;
+        C = 0x13;
+        D = 0x00;
+        E = 0xD8;
+        H = 0x01;
+        L = 0x4D;
+    }
 
     SP = 0xFFFE;  // Stack pointer at top of RAM
     PC = 0x0100;  // Start of cartridge ROM (skip BIOS)
@@ -30,6 +44,8 @@ void CPU::reset() {
     ime = false;        // Interrupts disabled initially
     ime_scheduled = false;
     halt_bug = false;
+    stop_speed_switch = false;
+    stop_pause = 0;
     cycles = 0;
 }
 
@@ -41,10 +57,21 @@ void CPU::step(MMU& mmu) {
         ime_scheduled = false;
     }
 
-    // STOP mode: the CPU sleeps until a joypad press (IF bit 4).
+    // STOP mode: the CPU sleeps until a joypad press (IF bit 4) or,
+    // for a CGB speed switch, until the ~2050 M-cycle switch pause
+    // elapses. The system counter (DIV) stays frozen the whole time -
+    // the emulator's cycle hook skips timer ticks while stopped.
     if (stopped) {
         cycles += 4;
         tickHook();
+        if (stop_speed_switch) {
+            if (--stop_pause == 0) {
+                mmu.applySpeedSwitch();
+                stopped = false;
+                stop_speed_switch = false;
+            }
+            return;
+        }
         u8 IF = mmu.read(0xFF0F) & 0x1F;
         if (IF & 0x10) {
             stopped = false;
@@ -201,9 +228,19 @@ void CPU::HALT(MMU& mmu) {
     // CPU enters low-power mode until an enabled interrupt is flagged
 }
 
-void CPU::STOP() {
-    // Low power mode; the CPU sleeps until a joypad press sets IF bit 4.
-    // The byte after the opcode is skipped (handled at the call site).
+void CPU::STOP(MMU& mmu) {
+    // CGB speed switch: STOP after arming KEY1 bit 0 toggles the CPU
+    // clock speed after a ~2050 M-cycle pause (DIV frozen meanwhile).
+    if (mmu.isCGB() && mmu.speedSwitchArmed()) {
+        stop_speed_switch = true;
+        stop_pause = 2050;
+        stopped = true;
+        return;
+    }
+    // Low power mode; the CPU sleeps until a joypad press sets IF
+    // bit 4. The byte after the opcode is skipped (handled at the
+    // call site), and the system counter stays frozen while stopped.
+    stop_speed_switch = false;
     stopped = true;
 }
 
@@ -592,9 +629,10 @@ void CPU::saveState(std::ofstream& file) const {
     // Save state flags
     u8 flags = (halted ? 0x01 : 0) | (stopped ? 0x02 : 0) |
                (ime ? 0x04 : 0) | (ime_scheduled ? 0x08 : 0) |
-               (halt_bug ? 0x10 : 0);
+               (halt_bug ? 0x10 : 0) | (stop_speed_switch ? 0x20 : 0);
     file.write(reinterpret_cast<const char*>(&flags), sizeof(flags));
     file.write(reinterpret_cast<const char*>(&cycles), sizeof(cycles));
+    file.write(reinterpret_cast<const char*>(&stop_pause), sizeof(stop_pause));
 }
 
 void CPU::loadState(std::ifstream& file) {
@@ -618,6 +656,8 @@ void CPU::loadState(std::ifstream& file) {
     ime = (flags & 0x04) != 0;
     ime_scheduled = (flags & 0x08) != 0;
     halt_bug = (flags & 0x10) != 0;
+    stop_speed_switch = (flags & 0x20) != 0;
     file.read(reinterpret_cast<char*>(&cycles), sizeof(cycles));
+    file.read(reinterpret_cast<char*>(&stop_pause), sizeof(stop_pause));
 }
 

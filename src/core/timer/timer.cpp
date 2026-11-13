@@ -30,17 +30,24 @@ void Timer::writeTIMA(u8 v) {
     interrupt_delay = 0;
 }
 
-void Timer::writeTAC(u8 v, MMU& mmu) {
+void Timer::writeTAC(u8 v, MMU& mmu, bool dmg_mode) {
     u8 old_tac = tac;
     tac = v & 0x07;
 
-    // The edge detector follows whatever bit TAC selects. Changing the
-    // selection while the timer is enabled can therefore create a
-    // falling edge (old bit high, new bit low).
     if ((old_tac & 0x04) && (tac & 0x04)) {
+        // The edge detector follows whatever bit TAC selects. Changing
+        // the selection while the timer is enabled can therefore create
+        // a falling edge (old bit high, new bit low).
         bool old_selected = (sys_counter >> selectedBit(old_tac)) & 1;
         bool new_selected = currentBit();
         if (old_selected && !new_selected) {
+            tima++;
+            if (tima == 0) serviceOverflow(mmu);
+        }
+    } else if ((old_tac & 0x04) && !(tac & 0x04) && dmg_mode) {
+        // DMG-only: disabling the timer while the selected bit reads 1
+        // sends one final tick. (Does not happen on CGB.)
+        if (currentBit()) {
             tima++;
             if (tima == 0) serviceOverflow(mmu);
         }

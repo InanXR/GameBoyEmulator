@@ -35,6 +35,8 @@ public:
     // Header info
     std::string getTitle() const;
     bool hasBattery() const { return battery; }
+    // CGB support flag from header 0x0143 (0x80 = DMG+CGB dual, 0xC0 = CGB only)
+    bool supportsCGB() const { return rom.size() > 0x143 && (rom[0x143] & 0x80) != 0; }
     bool hasRTC() const { return rtc_present; }
     const std::string& getFilePath() const { return filepath; }
 

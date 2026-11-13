@@ -48,6 +48,17 @@ public:
     // is fine; internally processed in T-cycle units).
     void tick(int m_cycles);
 
+    // Advance by t_cycles T-cycles directly. In CGB double-speed mode
+    // a CPU M-cycle is only 2 base T-cycles (the APU stays in the
+    // 4.19 MHz domain), so the emulator ticks the APU in T-cycle
+    // units: 4 per normal-speed M-cycle, 2 per double-speed one.
+    void tickT(int t_cycles);
+
+    // CGB PCM12/PCM34 debug registers (FF76/FF77): the generation
+    // circuits' raw digital outputs (0-15), unaffected by NR50/NR51.
+    u8 pcm12() const;
+    u8 pcm34() const;
+
     // Register access. `off` is addr - 0xFF00, in [0x10, 0x3F].
     u8 read(u8 off) const;
     void write(u8 off, u8 value);
@@ -136,6 +147,7 @@ private:
     mutable std::mutex buffer_mutex;
 
     // ---------- helpers ----------
+    int channelDigital(int ch) const;  // raw 0-15 output of CH1-4
     int pulsePeriod(const Pulse& ch, int base_off) const;
     int wavePeriod() const;
     int noisePeriod() const;

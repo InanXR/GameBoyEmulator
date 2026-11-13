@@ -198,6 +198,64 @@ PYEOF
 
 run_dmg_acid2
 
+# cgb-acid2: the Game Boy Color equivalent of the PPU rendering test.
+# Covers CGB palette RAM, BG map attributes (flips/banks/palette/
+# priority), sprite palettes and VRAM banks, OBJ priority modes and
+# HBlank DMA. Requires python3 + Pillow; compared in exact RGB.
+run_cgb_acid2() {
+    local out
+    if ! download "cgb-acid2.gbc" \
+        "https://github.com/mattcurrie/cgb-acid2/releases/download/v1.1/cgb-acid2.gbc"; then
+        echo "SKIP  cgb-acid2.gbc (download failed)"
+        return
+    fi
+    if ! download "cgb-acid2-ref.png" \
+        "https://raw.githubusercontent.com/mattcurrie/cgb-acid2/master/img/reference.png" png; then
+        echo "SKIP  cgb-acid2.gbc (reference download failed)"
+        return
+    fi
+    if ! python3 -c "import PIL" >/dev/null 2>&1; then
+        echo "SKIP  cgb-acid2.gbc (python3 + Pillow required for pixel comparison)"
+        return
+    fi
+
+    local shot="$ROM_DIR/cgb-acid2-shot.ppm"
+    timeout 120 "$EMU" "$ROM_DIR/cgb-acid2.gbc" --headless 120 --screenshot "$shot" >/dev/null 2>&1
+
+    python3 - "$shot" "$ROM_DIR/cgb-acid2-ref.png" <<'PYEOF'
+import sys, warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+from PIL import Image
+
+def load_ppm(path):
+    with open(path, 'rb') as f:
+        data = f.read()
+    parts = data.split(b'\n', 3)
+    assert parts[0] == b'P6' and parts[1] == b'160 144' and parts[2] == b'255'
+    return Image.frombytes('RGB', (160, 144), parts[3])
+
+ours = load_ppm(sys.argv[1]).convert('RGB')
+ref = Image.open(sys.argv[2]).convert('RGB')
+o, r = list(ours.getdata()), list(ref.getdata())
+mism = sum(1 for a, b in zip(o, r) if a != b)
+if mism == 0:
+    print("PASS  cgb-acid2.gbc (pixel-perfect, exact RGB)")
+    sys.exit(0)
+else:
+    print(f"FAIL  cgb-acid2.gbc ({mism} mismatched pixels of {len(r)})")
+    sys.exit(1)
+PYEOF
+    if [[ $? -eq 0 ]]; then
+        PASS=$((PASS + 1))
+    else
+        FAIL=$((FAIL + 1))
+        FAILED_TESTS+=("cgb-acid2.gbc")
+    fi
+    rm -f "$shot"
+}
+
+run_cgb_acid2
+
 echo "=============================================="
 echo " Results: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then

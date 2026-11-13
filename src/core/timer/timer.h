@@ -42,7 +42,9 @@ public:
 
     void writeTIMA(u8 v);
     void writeTMA(u8 v) { tma = v; }
-    void writeTAC(u8 v, MMU& mmu);
+    // dmg_mode: apply the DMG-only quirk where disabling the timer
+    // while the selected bit reads 1 sends one final tick (CGBs don't).
+    void writeTAC(u8 v, MMU& mmu, bool dmg_mode);
 
     // Save/Load state
     void saveState(std::ofstream& file) const;

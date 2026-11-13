@@ -18,7 +18,8 @@ void PPU::reset() {
     frame_ready = false;
     line_color_id.fill(0);
     line_sprite_id.fill(0xFF);
-    line_sprite_bg_priority.fill(0);
+    line_sprite_flags.fill(0);
+    line_bg_attr.fill(0);
 }
 
 void PPU::tick(MMU& mmu) {
@@ -36,6 +37,9 @@ void PPU::tick(MMU& mmu) {
             stat_line = false;
             mmu.setLY(0);
             framebuffer.fill(0);
+            // Palette RAM is free again, and no HDMA block can move
+            // without HBlanks.
+            mmu.setCramLocked(false);
         }
         lcd_was_on = false;
         return;
@@ -49,10 +53,13 @@ void PPU::tick(MMU& mmu) {
         window_shown = false;
         mode = OAM;
         mmu.setLY(0);
+        mmu.setCramLocked(false);
     }
     lcd_was_on = true;
 
-    dots += 4;  // one M-cycle = 4 T-cycles
+    // The dot clock always runs at 4.19 MHz. A normal-speed CPU
+    // M-cycle is 4 dots; a CGB double-speed M-cycle is 2 dots.
+    dots += mmu.isDoubleSpeed() ? 2 : 4;
 
     switch (mode) {
         case OAM:  // mode 2: 80 T-cycles
@@ -104,12 +111,20 @@ void PPU::tick(MMU& mmu) {
     updateSTAT(mmu);
 }
 
-// Change LCD mode and update the STAT mode bits.
+// Change LCD mode and update the STAT mode bits. Also informs the MMU
+// about the CGB side effects of mode transitions: palette RAM (CRAM)
+// is only inaccessible during mode 3, and one HBlank DMA block moves
+// at each HBlank entry while lines are visible.
 void PPU::setMode(Mode new_mode, MMU& mmu) {
     mode = new_mode;
     u8 stat = mmu.read(0xFF41);
     stat = static_cast<u8>((stat & 0xFC) | mode);
     mmu.setSTAT(stat);
+
+    mmu.setCramLocked(mode == VRAM);
+    if (mode == HBLANK && scanline < 144) {
+        mmu.hblankHDMA();
+    }
 }
 
 // The STAT interrupt is the OR of four conditions; the interrupt fires
@@ -150,45 +165,75 @@ void PPU::renderScanline(MMU& mmu) {
     renderBackgroundAndWindow(mmu);
     renderSprites(mmu);
 
-
-    // Combine: BG/window use BGP, sprites use OBP0/OBP1, honoring each
-    // winning sprite's BG-priority flag (DMG: sprites with the flag set
-    // hide behind BG colors 1-3).
-    u8 bgp  = mmu.read(0xFF47);
-    u8 obp0 = mmu.read(0xFF48);
-    u8 obp1 = mmu.read(0xFF49);
     size_t base = static_cast<size_t>(scanline) * 160;
 
-    for (int x = 0; x < 160; x++) {
-        u8 bg_id = line_color_id[x];
-        u8 sp = line_sprite_id[x];
+    if (!mmu.isCGB()) {
+        // DMG: BG/window use BGP, sprites use OBP0/OBP1, honoring
+        // each winning sprite's BG-priority flag (sprites with the
+        // flag set hide behind BG colors 1-3).
+        u8 bgp  = mmu.read(0xFF47);
+        u8 obp0 = mmu.read(0xFF48);
+        u8 obp1 = mmu.read(0xFF49);
 
-        if (sp != 0xFF && sp != 0) {
-            bool bg_priority = (line_sprite_bg_priority[x] & 0x80) != 0;
-            if (!bg_priority || bg_id == 0) {
-                bool pal1 = (line_sprite_bg_priority[x] & 0x01) != 0;
-                framebuffer[base + x] = getColor(pal1 ? obp1 : obp0, sp);
+        for (int x = 0; x < 160; x++) {
+            u8 bg_id = line_color_id[x];
+            u8 sp = line_sprite_id[x];
+
+            if (sp != 0xFF && sp != 0) {
+                u8 sf = line_sprite_flags[x];
+                bool bg_priority = (sf & 0x80) != 0;
+                if (!bg_priority || bg_id == 0) {
+                    bool pal1 = (sf & 0x10) != 0;
+                    framebuffer[base + x] = getColor(pal1 ? obp1 : obp0, sp);
+                    continue;
+                }
+            }
+            framebuffer[base + x] = getColor(bgp, bg_id);
+        }
+        return;
+    }
+
+    // CGB: colors come from palette RAM; priority between BG and the
+    // winning sprite pixel is decided by three flags (Pan Docs,
+    // "BG-to-OBJ Priority in CGB Mode"):
+    //   - BG color index 0: OBJ always wins
+    //   - LCDC bit 0 clear: OBJ always wins (master priority off)
+    //   - otherwise OBJ wins only if neither the sprite's OAM
+    //     attribute bit 7 nor the tile's BG map attribute bit 7
+    //     requests BG-over-OBJ priority
+    bool master_priority = (mmu.read(0xFF40) & 0x01) != 0;
+
+    for (int x = 0; x < 160; x++) {
+        u8 bg_id  = line_color_id[x];
+        u8 bg_att = line_bg_attr[x];
+
+        if (line_sprite_id[x] != 0xFF) {
+            u8 sf = line_sprite_flags[x];
+            if (bg_id == 0 || !master_priority ||
+                (((sf & 0x80) == 0) && ((bg_att & 0x80) == 0))) {
+                framebuffer[base + x] =
+                    mmu.objPaletteColor(sf & 0x07, line_sprite_id[x]);
                 continue;
             }
         }
-        framebuffer[base + x] = getColor(bgp, bg_id);
+        framebuffer[base + x] = mmu.bgPaletteColor(bg_att & 0x07, bg_id);
     }
 }
 
-u8 PPU::tilePixel(MMU& mmu, u16 tile_data, bool unsigned_mode,
+u8 PPU::tilePixel(MMU& mmu, u8 bank, u16 tile_data_base, bool unsigned_mode,
                   u8 tile_num, int tile_y, int tile_x) const {
     u16 addr;
     if (unsigned_mode) {
-        addr = tile_data + static_cast<u16>(tile_num) * 16;
+        addr = static_cast<u16>(tile_data_base + static_cast<u16>(tile_num) * 16);
     } else {
         // Signed addressing: tile numbers 128-255 map below the base
         i8 signed_tile = static_cast<i8>(tile_num);
-        addr = tile_data + 0x800 + static_cast<u16>(signed_tile) * 16;
+        addr = static_cast<u16>(tile_data_base + 0x800 + static_cast<u16>(signed_tile) * 16);
     }
     addr = static_cast<u16>(addr + tile_y * 2);
 
-    u8 byte1 = mmu.read(addr);
-    u8 byte2 = mmu.read(static_cast<u16>(addr + 1));
+    u8 byte1 = mmu.vramAt(bank, addr);
+    u8 byte2 = mmu.vramAt(bank, static_cast<u16>(addr + 1));
 
     int bit = 7 - tile_x;
     return static_cast<u8>((((byte2 >> bit) & 1) << 1) | ((byte1 >> bit) & 1));
@@ -196,9 +241,13 @@ u8 PPU::tilePixel(MMU& mmu, u16 tile_data, bool unsigned_mode,
 
 void PPU::renderBackgroundAndWindow(MMU& mmu) {
     u8 lcdc = mmu.read(0xFF40);
+    bool cgb = mmu.isCGB();
 
-    bool bg_win_enabled = (lcdc & 0x01) != 0;  // DMG: gates BG and window
-    bool window_enabled = (lcdc & 0x20) != 0 && bg_win_enabled;
+    // On DMG, LCDC bit 0 blanks both BG and window. On CGB it is the
+    // BG/OBJ master-priority flag instead: BG and window always draw.
+    bool bg_win_enabled = (lcdc & 0x01) != 0;
+    bool window_enabled = (lcdc & 0x20) != 0 && (bg_win_enabled || cgb);
+    bool bg_enabled = bg_win_enabled || cgb;
 
     u8 scy = mmu.read(0xFF42);
     u8 scx = mmu.read(0xFF43);
@@ -229,6 +278,7 @@ void PPU::renderBackgroundAndWindow(MMU& mmu) {
     // Count the window line once per scanline that renders it.
     bool window_used = false;
 
+    if (cgb) line_bg_attr.fill(0);
 
     for (int x = 0; x < 160; x++) {
         u8 color_id;
@@ -239,18 +289,41 @@ void PPU::renderBackgroundAndWindow(MMU& mmu) {
             int col = wx_rel / 8;
             int tile_x = wx_rel % 8;
 
-            u16 tile_addr = win_tilemap + static_cast<u16>(win_tile_row * 32 + col);
-            u8 tile_num = mmu.read(tile_addr);
-            color_id = tilePixel(mmu, tile_data, unsigned_mode, tile_num, win_tile_y, tile_x);
+            u16 tile_addr = static_cast<u16>(win_tilemap + win_tile_row * 32 + col);
+            u8 tile_num = mmu.vramAt(0, tile_addr);
+            if (cgb) {
+                // The attribute byte lives in VRAM bank 1 at the same
+                // map address: palette (bits 0-2), tile bank (bit 3),
+                // flips (bits 5-6), BG-over-OBJ priority (bit 7).
+                u8 attr = mmu.vramAt(1, tile_addr);
+                int ty = (attr & 0x40) ? 7 - win_tile_y : win_tile_y;
+                int tx = (attr & 0x20) ? 7 - tile_x : tile_x;
+                color_id = tilePixel(mmu, (attr & 0x08) ? 1 : 0,
+                                     tile_data, unsigned_mode, tile_num, ty, tx);
+                line_bg_attr[static_cast<size_t>(x)] = static_cast<u8>(attr & 0x87);
+            } else {
+                color_id = tilePixel(mmu, 0, tile_data, unsigned_mode,
+                                    tile_num, win_tile_y, tile_x);
+            }
             window_used = true;
-        } else if (bg_win_enabled) {
+        } else if (bg_enabled) {
             int pixel_x = (x + scx) & 0xFF;
             int col = pixel_x / 8;
             int tile_x = pixel_x % 8;
 
-            u16 tile_addr = bg_tilemap + static_cast<u16>(bg_tile_row * 32 + col);
-            u8 tile_num = mmu.read(tile_addr);
-            color_id = tilePixel(mmu, tile_data, unsigned_mode, tile_num, bg_tile_y, tile_x);
+            u16 tile_addr = static_cast<u16>(bg_tilemap + bg_tile_row * 32 + col);
+            u8 tile_num = mmu.vramAt(0, tile_addr);
+            if (cgb) {
+                u8 attr = mmu.vramAt(1, tile_addr);
+                int ty = (attr & 0x40) ? 7 - bg_tile_y : bg_tile_y;
+                int tx = (attr & 0x20) ? 7 - tile_x : tile_x;
+                color_id = tilePixel(mmu, (attr & 0x08) ? 1 : 0,
+                                     tile_data, unsigned_mode, tile_num, ty, tx);
+                line_bg_attr[static_cast<size_t>(x)] = static_cast<u8>(attr & 0x87);
+            } else {
+                color_id = tilePixel(mmu, 0, tile_data, unsigned_mode,
+                                    tile_num, bg_tile_y, tile_x);
+            }
         } else {
             color_id = 0;  // BG disabled: blank (DMG bit 0 gates both layers)
         }
@@ -263,11 +336,12 @@ void PPU::renderBackgroundAndWindow(MMU& mmu) {
 
 void PPU::renderSprites(MMU& mmu) {
     u8 lcdc = mmu.read(0xFF40);
+    bool cgb = mmu.isCGB();
 
     // Always clear the sprite buffers first: when sprites are disabled
     // the previous scanline's sprite data must not leak through.
     line_sprite_id.fill(0xFF);
-    line_sprite_bg_priority.fill(0);
+    line_sprite_flags.fill(0);
 
     if (!(lcdc & 0x02)) return;  // sprites disabled
 
@@ -276,8 +350,7 @@ void PPU::renderSprites(MMU& mmu) {
     int line = scanline;
 
     // Hardware serves at most 10 sprites per scanline (first 10 in OAM
-    // order that overlap the line). Among those, the pixel-level winner
-    // is the sprite with the smallest X; ties go to the lower OAM index.
+    // order that overlap the line).
     struct Candidate {
         int x;
         int oam_index;
@@ -306,33 +379,35 @@ void PPU::renderSprites(MMU& mmu) {
         candidates[num_candidates].flags = flags;
         candidates[num_candidates].row = row;
         num_candidates++;
-
     }
 
     if (num_candidates == 0) return;
 
-    // Priority order: smaller X first; ties by OAM index. std::sort with
-    // this comparator also preserves nothing else - we compare indices
-    // explicitly so it is a strict weak ordering.
-    std::sort(candidates, candidates + num_candidates,
-              [](const Candidate& a, const Candidate& b) {
-                  if (a.x != b.x) return a.x < b.x;
-                  return a.oam_index < b.oam_index;
-              });
+    // Drawing priority among the selected sprites: DMG (and CGB in
+    // DMG compatibility mode, OPRI bit 0 set) sorts by X coordinate,
+    // ties broken by OAM index. Native CGB mode uses plain OAM order.
+    if (!cgb || mmu.objPriorityByX()) {
+        std::sort(candidates, candidates + num_candidates,
+                  [](const Candidate& a, const Candidate& b) {
+                      if (a.x != b.x) return a.x < b.x;
+                      return a.oam_index < b.oam_index;
+                  });
+    }
 
     // Draw in priority order: the first sprite to emit a non-transparent
-    // pixel claims it.
+    // pixel claims it. ("BG over OBJ" is resolved later, in the scanline
+    // composite, exactly like hardware does.)
     for (int i = 0; i < num_candidates; i++) {
         const Candidate& s = candidates[i];
 
         bool flip_x = (s.flags & 0x20) != 0;
-        bool priority = (s.flags & 0x80) != 0;  // 1 = behind BG colors 1-3
-        bool palette1 = (s.flags & 0x10) != 0;
 
         u8 tile_index = height_16 ? static_cast<u8>(s.tile & 0xFE) : s.tile;
+        // CGB: OAM attribute bit 3 selects the sprite tile's VRAM bank.
+        u8 bank = (cgb && (s.flags & 0x08)) ? 1 : 0;
         u16 tile_addr = static_cast<u16>(0x8000 + tile_index * 16 + s.row * 2);
-        u8 byte1 = mmu.read(tile_addr);
-        u8 byte2 = mmu.read(static_cast<u16>(tile_addr + 1));
+        u8 byte1 = mmu.vramAt(bank, tile_addr);
+        u8 byte2 = mmu.vramAt(bank, static_cast<u16>(tile_addr + 1));
 
         for (int px = 0; px < 8; px++) {
             int pixel_x = s.x + px;
@@ -346,8 +421,7 @@ void PPU::renderSprites(MMU& mmu) {
             if (line_sprite_id[idx] != 0xFF) continue;  // claimed already
 
             line_sprite_id[idx] = color_id;
-            line_sprite_bg_priority[idx] =
-                static_cast<u8>((priority ? 0x80 : 0) | (palette1 ? 0x01 : 0));
+            line_sprite_flags[idx] = s.flags;
         }
     }
 }

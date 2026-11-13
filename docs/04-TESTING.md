@@ -20,8 +20,8 @@ Verification happens at three levels:
 
 | Level | What | How to run |
 |---|---|---|
-| Unit | Timer edges, CPU flags, serial, joypad, save-state round-trips | `ctest` (or `./build/gb_unit_tests`) |
-| Accuracy (ROM-based) | blargg CPU/timing suites + dmg-acid2 pixel comparison | `bash tests/run_tests.sh` |
+| Unit | Timer edges, CPU flags, serial, joypad, CGB registers/banking/HDMA/speed switch, save-state round-trips | `ctest` (or `./build/gb_unit_tests`) |
+| Accuracy (ROM-based) | blargg CPU/timing suites + dmg-acid2 and cgb-acid2 pixel comparisons | `bash tests/run_tests.sh` |
 | Smoke | Clean build on 3 OSes, warning-free compile | CI (GitHub Actions) |
 
 The ROM-based suite is the ground truth: these are the same test ROMs
@@ -85,8 +85,17 @@ from the freely redistributable sources into `.test-roms/` (or
   framebuffer as a PPM, and compares it to the official reference image
   **pixel by pixel** (requires python3 + Pillow; skipped with a notice
   otherwise).
+- **cgb-acid2** — the Game Boy Color rendering test: palette RAM, BG
+  map attributes, sprite palettes/banks, priority modes and HBlank DMA.
+  Same procedure, compared in exact RGB using the reference image's
+  documented 5-to-8-bit conversion `(v << 3) | (v >> 2)`.
 - **halt_bug.gb** — a survey ROM with no pass/fail verdict; the script
   verifies it runs to completion and reports it as `INFO`.
+
+Note: the blargg CPU/timing ROMs carry a CGB flag in their headers, so
+the accuracy suite exercises the CGB boot path and CGB-mode execution
+on those tests too; dmg-acid2 is header-flagged DMG and pins the
+monochrome path.
 
 Output on a healthy tree:
 
@@ -96,8 +105,9 @@ PASS  01-special.gb
 PASS  instr_timing.gb
 INFO  halt_bug.gb (no verdict; survey ROM ran to completion)
 PASS  dmg-acid2.gb (pixel-perfect)
+PASS  cgb-acid2.gbc (pixel-perfect, exact RGB)
 ==============================================
- Results: 13 passed, 0 failed
+ Results: 14 passed, 0 failed
  All tests passed!
 ```
 
@@ -120,6 +130,7 @@ mysterious emulator crash.
 | `10-bit ops` | All CB bit/rotate/shift ops incl. `(HL)` variants |
 | `instr_timing` | Every instruction's cycle count via timer-measured deltas; requires the falling-edge timer model *and* lockstep component ticking |
 | `dmg-acid2` | Window (2 tile maps, internal line counter, mid-frame WX/LCDC), sprite priority (X, OAM, BG-flag, 10-sprite limit, 8×16 index masking), LYC/STAT interrupt choreography, LCD-off blanking, signed tile addressing |
+| `cgb-acid2.gbc` | CGB PPU: palette RAM, BG map attributes (flips/banks/palettes/priority), sprite palettes and VRAM banks, OBJ priority, HBlank DMA |
 | `halt_bug.gb` | HALT-bug trigger matrix across IE/IF combinations (informational) |
 
 ## 5. Continuous Integration
@@ -128,7 +139,7 @@ mysterious emulator crash.
 
 1. **Build matrix** — Ubuntu, macOS, Windows (vcpkg), Release builds.
 2. **Accuracy job** — Ubuntu: builds, runs `ctest` and
-   `tests/run_tests.sh`; the full 13-test suite must stay green.
+   `tests/run_tests.sh`; the full 14-test suite must stay green.
 
 Keep CI green: if a change intentionally alters timing or rendering,
 expect `instr_timing` or `dmg-acid2` to fail *only if accuracy

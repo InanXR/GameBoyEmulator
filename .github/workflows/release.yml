@@ -45,7 +45,8 @@ jobs:
           | blargg cpu_instrs (01-11) | 11/11 pass |
           | blargg instr_timing | pass (M-cycle-exact instruction timing) |
           | dmg-acid2 | pixel-perfect (0/23040 pixels differ) |
-          | Unit checks (CTest) | 30/30 |
+          | cgb-acid2 | pixel-perfect (0/23040 pixels differ, exact RGB) |
+          | Unit checks (CTest) | 99/99 |
 
           ## Downloads
 
@@ -56,32 +57,30 @@ jobs:
           | GameBoyEmulator-${TAG}-macOS-arm64.tar.gz | macOS 14+ on Apple Silicon | brew install sdl2 |
           | GameBoyEmulator-${TAG}-macOS-x64.tar.gz | macOS 14+ on Intel | brew install sdl2 |
 
-          ## Highlights since v1.0.0
+          ## New in 3.0.0: full Game Boy Color support
 
-          - blargg cpu_instrs improved from 8/11 to 11/11; instr_timing
-            passes
-          - dmg-acid2 rendered pixel-perfect: window layer, full DMG
-            sprite priority, STAT interrupt blocking
-          - Complete APU: wave and noise channels, CH1 frequency sweep,
-            stereo mixing, per-channel DACs, high-pass filter
-          - DMG-exact timer circuit: falling-edge TIMA, DIV write and
-            TAC change effects, delayed TMA reload
-          - HALT bug; immediate interrupt dispatch on HALT wake-up
-          - MBC fixes: MBC2 RAM, MBC1 mode-1 banking, MBC3 RTC ticking
-            and latch, MBC5 rumble masking
-          - Battery saves (.sav including RTC state); save states v2
-          - Serial port output, headless mode, gamepad support,
-            turbo/pause/reset hotkeys
-          - Restructured into a platform-free core library plus an SDL2
-            frontend
+          - CGB hardware model: color palettes (8 BG + 8 OBJ, RGB555),
+            VRAM banking with BG map attributes (flips, banks,
+            priority), WRAM banking, HBlank/general-purpose DMA to
+            VRAM, and double-speed CPU via KEY1 + STOP
+          - Correct CGB BG/OBJ priority rules and OAM-index sprite
+            priority (DMG-style X priority via OPRI)
+          - STOP now freezes DIV on both models; CGB speed switch
+            emulated with the ~2050 M-cycle hardware pause
+          - cgb-acid2 rendered pixel-perfect; DMG accuracy (blargg
+            11/11, dmg-acid2 pixel-perfect) fully preserved
+          - Save states v3 (CGB register file, palettes, HDMA, speed);
+            --dmg flag forces monochrome mode for any ROM
 
           Full changelog: CHANGELOG.md in the repository.
 
           ## Usage
 
-              gameboy <rom.gb>              windowed; F5/F8 save states, Tab turbo
-              gameboy <rom.gb> --scale 3    window scale 1-8
-              gameboy <rom.gb> --headless N  run N frames without a window
+              gameboy <rom.gb>               DMG game, windowed; F5/F8 states, Tab turbo
+              gameboy <rom.gbc>              Game Boy Color game
+              gameboy <rom.gbc> --dmg        force monochrome mode
+              gameboy <rom.gb> --scale 3     window scale 1-8
+              gameboy <rom.gb> --headless N   run N frames without a window
           EOF
           # Idempotent: a re-run with the same version reuses the
           # existing release instead of failing on the duplicate tag.

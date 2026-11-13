@@ -14,6 +14,12 @@
  * free: the SDL frontend (src/platform/main.cpp) owns the windowed
  * loop, display input, audio device, hotkeys and frame pacing, and the
  * automated test suite drives it headless.
+ *
+ * Hardware model: a cartridge whose header CGB flag ($0143) has bit 7
+ * set boots as a Game Boy Color (CGB registers, banked VRAM/WRAM,
+ * palette RAM, double-speed CPU); everything else boots as a DMG. The
+ * frontend can force DMG with the --dmg flag (for CGB palettes-in-
+ * monochrome comparisons or debugging).
  */
 class Emulator {
 public:
@@ -25,9 +31,10 @@ public:
     Emulator& operator=(const Emulator&) = delete;
 
     // ---- session control -------------------------------------------
-    bool loadROM(const std::string& romPath);
+    // force_dmg: ignore the cartridge's CGB flag and boot as a DMG.
+    bool loadROM(const std::string& romPath, bool force_dmg = false);
     void reset();          // power-cycle, keeping the battery save
-    void runFrame();       // exactly 70224 T-cycles of emulation
+    void runFrame();       // one PPU frame (70224 dots) of emulation
     void runHeadless(int frames);  // run N frames, no window required
 
     // ---- save states ------------------------------------------------
@@ -37,8 +44,10 @@ public:
 
     // ---- frontend accessors -----------------------------------------
     bool isRunning() const { return running; }
+    bool isCGB() const { return mmu.isCGB(); }
+    bool isDoubleSpeed() const { return mmu.isDoubleSpeed(); }
     const std::string& getSerialOutput() const { return mmu.getSerialOutput(); }
-    const std::array<u8, 160 * 144>& framebuffer() const { return ppu.framebuffer; }
+    const std::array<u16, 160 * 144>& framebuffer() const { return ppu.framebuffer; }
 
     Joypad& joypad() { return mmu.getJoypad(); }
     APU& audio() { return mmu.getAPU(); }

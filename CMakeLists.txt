@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(GameBoyEmulator
-    VERSION 2.0.0
+    VERSION 3.0.0
     DESCRIPTION "Game Boy (DMG) emulator: C++17 core + SDL2 frontend"
     LANGUAGES CXX
 )

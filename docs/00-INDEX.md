@@ -11,7 +11,7 @@ cross-referenced where relevant.
 | 03 | [Hardware Notes](03-HARDWARE-NOTES.md) | The DMG hardware behavior implemented in the emulator, subsystem by subsystem, with references |
 | 04 | [Testing](04-TESTING.md) | The automated accuracy suite, unit tests, CI, and how to add new tests |
 | 05 | [Accuracy Status](05-ACCURACY.md) | Verification matrix, what passes, known limitations and why |
-| 06 | [References](06-REFERENCES.md) | Source material: Pan Docs, Gekkio's gbctr, blargg's test ROMs, dmg-acid2 |
+| 06 | [References](06-REFERENCES.md) | Source material: Pan Docs, Gekkio's gbctr, blargg's test ROMs, dmg-acid2/cgb-acid2 |
 | 07 | [Dev Tools](07-DEV-TOOLS.md) | The opcode generation tooling and opcode specification tables |
 
 ## Quick Paths

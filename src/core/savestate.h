@@ -20,6 +20,9 @@ class Timer;
  * v2 (2026): complete state - CPU, MMU (incl. timer + APU registers),
  *            cartridge (MBC + RTC), PPU (scanline/mode/window), APU
  *            (all channels), timer (DIV phase).
+ * v3 (2026): CGB state - hardware mode/speed, VRAM/WRAM banks, palette
+ *            RAM + indices, HDMA engine, RGB555 framebuffer, STOP
+ *            speed-switch pause. v2 states are rejected.
  */
 class SaveState {
 public:
@@ -33,5 +36,5 @@ public:
 
 private:
     static constexpr const char* MAGIC = "GBSTATE";
-    static constexpr u8 VERSION = 2;
+    static constexpr u8 VERSION = 3;
 };

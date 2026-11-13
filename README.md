@@ -4,14 +4,14 @@
   <img src="assets/Nintendo_Game_Boy_Emulator_Logo.png" alt="GameBoy Emulator logo" width="400">
 </p>
 
-A Game Boy (DMG) emulator in C++17 with an SDL2 frontend, built for
-accuracy: the complete blargg CPU test suite passes, instruction timing
-is verified to the M-cycle, and the PPU renders the dmg-acid2 reference
-image pixel-perfect.
+A Game Boy and Game Boy Color emulator in C++17 with an SDL2 frontend,
+built for accuracy: the complete blargg CPU test suite passes, instruction
+timing is verified to the M-cycle, and the PPU renders both the dmg-acid2
+and cgb-acid2 reference images pixel-perfect.
 
 ![C++17](https://img.shields.io/badge/C++-17-00599C?logo=c%2B%2B)
 ![SDL2](https://img.shields.io/badge/SDL-2.0-green)
-![Tests](https://img.shields.io/badge/tests-13%2F13%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-14%2F14%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
 ## Contents
@@ -37,8 +37,9 @@ image pixel-perfect.
 | blargg `cpu_instrs` (01-11, all 11 ROMs) | pass |
 | blargg `instr_timing` | pass (M-cycle-exact instruction timing) |
 | `dmg-acid2` (mattcurrie) | pixel-perfect: 0 of 23040 pixels differ from the reference |
+| `cgb-acid2` (mattcurrie) | pixel-perfect: 0 of 23040 pixels differ, exact RGB |
 | blargg `halt_bug` survey ROM | runs to completion; halt-bug trigger matrix matches hardware |
-| Unit tests (timer edges, ALU flags, serial, joypad, save states) | 30/30 |
+| Unit tests (timer edges, ALU flags, serial, joypad, CGB registers, HDMA, save states) | 99/99 |
 | blargg `mem_timing-2` | not passing; requires sub-M-cycle DIV phase modeling (see [11](#11-known-limitations)) |
 
 Headless throughput is roughly 16x real time on a modern desktop core.
@@ -64,6 +65,37 @@ Headless throughput is roughly 16x real time on a modern desktop core.
 - **Serial port**: transfers echoed to stdout, which is how the
   automated test suite collects ROM results
 
+### Game Boy Color (CGB)
+
+Cartridges flagged CGB in the header (`0x143` = `0x80` or `0xC0`) boot as
+a Game Boy Color with the CGB boot register state (A=`0x11`); everything
+else boots as a DMG, and `--dmg` forces DMG mode for any ROM.
+
+- **Color palettes**: 8 background and 8 object palettes in palette RAM
+  (RGB555), accessed through BGPI/BGPD and OBPI/OBPD with write
+  auto-increment; palette RAM locks while the PPU reads it (mode 3)
+- **VRAM banking**: 16 KiB across two banks (VBK `$FF4F`); bank 1 holds
+  tile data and the BG-map attribute table — per-tile palette, VRAM
+  bank, X/Y flips and BG-over-OBJ priority
+- **WRAM banking**: 32 KiB across eight banks (SVBK `$FF70`), bank 0
+  always at C000, echo region included
+- **CGB priority rules**: LCDC bit 0 becomes the BG/OBJ master-priority
+  flag; per-pixel resolution honors the OAM priority flag, the BG map
+  attribute priority bit and BG color 0, exactly per Pan Docs
+- **Object priority**: OAM-index order in CGB mode, DMG-style
+  X-coordinate order when OPRI selects it
+- **VRAM DMA (HDMA/GDMA)**: general-purpose instant transfers and
+  HBlank transfers moving one 16-byte block per HBlank of lines 0-143,
+  with cancel, readback and destination-overflow semantics
+- **Double speed**: KEY1-armed STOP toggles the CPU clock after the
+  ~2050 M-cycle hardware pause; CPU, timer, DIV and OAM DMA run at
+  double rate while the PPU and APU keep their normal timing
+- **STOP semantics**: DIV (the system counter) freezes while the CPU
+  sleeps, on both models; wake on joypad press
+- **CGB register file**: RP (infrared), PCM12/PCM34 (live APU channel
+  outputs), KEY0, OPRI and the undocumented `$FF72-75`; all read `$FF`
+  and ignore writes in DMG mode
+
 ### Cartridges
 
 - **MBC1**: both banking modes, including mode-1 remapping of the
@@ -87,7 +119,7 @@ Headless throughput is roughly 16x real time on a modern desktop core.
 - **Display**: hardware-accelerated, integer-scaled, resizable window;
   fullscreen toggle; gamepad support
 - **Runtime controls**: turbo, pause, reset, volume, screenshots
-- **Test suite**: one command runs 13 ROM-based accuracy tests plus 30
+- **Test suite**: one command runs 14 ROM-based accuracy tests plus 99
   unit checks through CTest
 
 ## 3. Documentation
@@ -157,11 +189,17 @@ tests, also registered with CTest).
 ## 6. Running
 
 ```bash
-./build/gameboy "roms/YourGame.gb"
+./build/gameboy "roms/YourGame.gb"      # DMG game
+./build/gameboy "roms/YourGame.gbc"     # Game Boy Color game
 ```
+
+The hardware model follows the cartridge header (CGB flag `0x143`).
+A ROM flagged for both systems boots as a CGB; use `--dmg` to force
+monochrome mode.
 
 | Option | Effect |
 |---|---|
+| `--dmg` | Force DMG mode (ignore the cartridge's CGB flag) |
 | `--headless N` | Run N frames without a window or audio, then exit |
 | `--screenshot FILE` | Headless only: write the final framebuffer as a PPM (P6) image |
 | `--scale N` | Window integer scale, 1-8 (default 4) |
@@ -194,10 +232,10 @@ Keyboard and gamepad inputs are merged; both work simultaneously.
 ## 8. Testing
 
 The accuracy suite downloads freely redistributable test ROMs (blargg's
-`cpu_instrs`, `instr_timing`, `halt_bug`, and `dmg-acid2`) into
-`.test-roms/` on first run, executes them headless, and verifies the
-results — including a pixel-for-pixel framebuffer comparison against
-the dmg-acid2 reference image. Details in
+`cpu_instrs`, `instr_timing`, `halt_bug`, and mattcurrie's `dmg-acid2`
+and `cgb-acid2`) into `.test-roms/` on first run, executes them headless,
+and verifies the results — including pixel-for-pixel framebuffer
+comparisons against both acid2 reference images. Details in
 [docs/04-Testing](docs/04-TESTING.md).
 
 ```bash
@@ -213,8 +251,9 @@ PASS  02-interrupts.gb
 PASS  instr_timing.gb
 INFO  halt_bug.gb (no verdict; survey ROM ran to completion)
 PASS  dmg-acid2.gb (pixel-perfect)
+PASS  cgb-acid2.gbc (pixel-perfect, exact RGB)
 ==============================================
- Results: 13 passed, 0 failed
+ Results: 14 passed, 0 failed
  All tests passed!
 ```
 
@@ -260,40 +299,51 @@ GameBoyEmulator/
 
 ## 10. Technical summary
 
-- **CPU**: Sharp LR35902 at 4.194304 MHz. Components tick in lockstep
-  with the CPU every M-cycle, so register changes are visible to the
-  instruction that reads them. Interrupt dispatch takes 5 M-cycles and
-  pushes the correct resume address when waking from HALT.
-- **Graphics**: 160x144, 4 shades, 59.7 Hz. Mode timing 80/172/204
+- **CPU**: Sharp LR35902 at 4.194304 MHz (8.388608 MHz in CGB double
+  speed). Components tick in lockstep with the CPU every M-cycle, so
+  register changes are visible to the instruction that reads them.
+  Interrupt dispatch takes 5 M-cycles and pushes the correct resume
+  address when waking from HALT.
+- **Graphics**: 160x144, 59.7 Hz. DMG: 4 shades; CGB: RGB555 colors
+  from palette RAM. The dot clock always runs at 4.19 MHz — in CGB
+  double speed the CPU does 2 dots of work per M-cycle, so the frame
+  is 140448 CPU T-cycles instead of 70224. Mode timing 80/172/204
   T-cycles (OAM scan, transfer, HBlank). LCDC bit 0 blanks both
-  background and window on DMG; sprites still render.
+  background and window on DMG; on CGB it is the BG/OBJ
+  master-priority flag.
 - **Audio**: 512 Hz frame sequencer (DIV-APU): length at 256 Hz, sweep
   at 128 Hz, envelope at 64 Hz. The core synthesizes 44.1 kHz stereo
   into a thread-safe ring buffer; the platform audio callback drains it.
 - **Save data**: `<rom>.sav` (battery RAM plus RTC registers) and
-  `<rom>.state` (complete machine state, version-checked).
+  `<rom>.state` (complete machine state including the CGB register
+  file, version-checked).
 
 ## 11. Known limitations
 
 - blargg `mem_timing-2` does not pass: it requires modeling the exact
   T-cycle within each M-cycle at which DIV advances relative to memory
   accesses. The architecture is M-cycle granular by design.
-- No Game Boy Color support; CGB-flagged ROMs run in DMG mode.
+- CGB HBlank DMA moves each 16-byte block instantly at HBlank entry
+  rather than stalling the CPU for the hardware's ~8 M-cycles per
+  block; GDMA is likewise atomic. Data placement and completion flags
+  are correct, transfer *duration* is not billed to the CPU.
+- On DMG, hardware turns the LCD off during STOP; the emulator keeps
+  rendering (the DIV freeze is emulated on both models).
 - No link cable: the serial port is loopback-to-host only.
-- STOP parks the CPU until a joypad press but does not freeze DIV.
 - No debugger or cheat-code interface.
 
-Planned: CGB support, rewind, link-cable-over-network, debugger,
-sub-M-cycle DIV phase accuracy.
+Planned: rewind, link-cable-over-network, debugger, sub-M-cycle DIV
+phase accuracy.
 
 ## 12. References
 
 - [Pan Docs](https://gbdev.io/pandocs/) — the Game Boy hardware
-  reference; MBC, timer, APU and STAT behavior follows it directly
+  reference; MBC, timer, APU, CGB and STAT behavior follows it directly
 - Blargg's test ROMs ([retrio mirror](https://github.com/retrio/gb-test-roms)) —
   the CPU and timing verification suites
-- [dmg-acid2](https://github.com/mattcurrie/dmg-acid2) (mattcurrie) —
-  the PPU rendering acid test
+- [dmg-acid2](https://github.com/mattcurrie/dmg-acid2) and
+  [cgb-acid2](https://github.com/mattcurrie/cgb-acid2) (mattcurrie) —
+  the PPU rendering acid tests
 - [Gekkio's gbctr](https://gekkio.fi/files/gb-docs/gbctr.pdf) —
   interrupt and HALT hardware analysis
 - SDL2 — cross-platform graphics and audio
@@ -311,4 +361,4 @@ a green `bash tests/run_tests.sh`. See
 ---
 
 Maintained by Inan. Original release 2025; accuracy overhaul and
-core/platform restructure 2026.
+core/platform restructure 2026; Game Boy Color support 2026 (v3.0).
