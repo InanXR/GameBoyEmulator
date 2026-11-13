@@ -112,20 +112,30 @@ jobs:
       - name: Install dependencies
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends build-essential cmake libsdl2-dev curl ca-certificates gnupg
-          # gh is not in the 22.04 archive; use the official apt feed.
-          curl -fsSL https://cli.github.com/packages/githubcli-keyring.gpg \
-            -o /usr/share/keyrings/githubcli-archive-keyring.gpg
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-            > /etc/apt/sources.list.d/github-cli.list
-          apt-get update
-          apt-get install -y --no-install-recommends gh
+          apt-get install -y --no-install-recommends build-essential cmake libsdl2-dev curl ca-certificates
+          # gh is not in the 22.04 archive. Pull the release .deb straight
+          # from github.com (same host the checkout uses) instead of the
+          # cli.github.com apt feed, which is not reliably reachable from
+          # containers.
+          GH_TAG=$(curl -fsSL -o /dev/null -w '%{url_tag}' https://github.com/cli/cli/releases/latest)
+          GH_VERSION=${GH_TAG#*/v}
+          curl -fsSL -o /tmp/gh.deb \
+            "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.deb"
+          apt-get install -y /tmp/gh.deb
 
       - name: Build
         run: |
+          set -o pipefail
           cmake -B build -S . -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc"
-          cmake --build build -j"$(nproc)"
+          cmake --build build -j"$(nproc)" 2>&1 | tee build.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            grep -iE 'error|fatal' build.log | sort -u | head -30 | while IFS= read -r line; do
+              printf '::error::%s\n' "${line:0:180}"
+            done
+          fi
+          exit "$rc"
 
       - name: Package and upload
         env:
@@ -159,17 +169,32 @@ jobs:
         run: |
           cmake -B build -S . -DCMAKE_BUILD_TYPE=Release "-DCMAKE_PREFIX_PATH=$env:SDL2_PREFIX"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cmake --build build --config Release
+          cmake --build build --config Release 2>&1 | Tee-Object -FilePath build.log
+          if ($LASTEXITCODE -ne 0) {
+            Select-String -Path build.log -Pattern 'error' | Select-Object -First 30 | ForEach-Object {
+              Write-Host "::error::$($_.Line.Substring(0, [Math]::Min(180, $_.Line.Length)))"
+            }
+            exit $LASTEXITCODE
+          }
 
       - name: Package and upload
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          Compress-Archive -Path build/gameboy.exe, build/SDL2.dll, README.md -DestinationPath "GameBoyEmulator-$($env:TAG)-Windows-x64.zip"
+          # The Visual Studio multi-config generator appends /Release to
+          # the runtime output directory; fall back to build/ just in case.
+          $bin = "build/Release"
+          if (-not (Test-Path "$bin/gameboy.exe")) { $bin = "build" }
+          if (-not (Test-Path "$bin/gameboy.exe") -or -not (Test-Path "$bin/SDL2.dll")) {
+            Write-Host "::error::gameboy.exe or SDL2.dll not found in build/Release or build/"
+            exit 1
+          }
           $asset = "GameBoyEmulator-$($env:TAG)-Windows-x64.zip"
+          Compress-Archive -Path "$bin/gameboy.exe", "$bin/SDL2.dll", README.md -DestinationPath $asset -ErrorAction Stop
           # --clobber replaces an existing asset, so re-runs are safe
           gh release upload $env:TAG $asset --clobber
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   macos:
     name: Build macOS ${{ matrix.suffix }}
