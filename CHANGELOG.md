@@ -68,5 +68,5 @@ Initial release: Sharp LR35902 CPU (512 opcodes), PPU (background and
 sprites), APU (square channels 1–2), timer, MBC1/2/3/5, SDL2 display,
 save states, keyboard input.
 
-[2.0.0]: https://github.com/InanXR/GameBoyEmulator/compare/v1.0.0...v2.0.0
+[2.0.0]: https://github.com/InanXR/GameBoyEmulator/releases/tag/v2.0.0
 [1.0.0]: https://github.com/InanXR/GameBoyEmulator/releases/tag/v1.0.0
