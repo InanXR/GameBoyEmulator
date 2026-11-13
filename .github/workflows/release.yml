@@ -10,6 +10,11 @@ name: Release
 on:
   push:
     branches: [main]
+  # Manual re-runs from the Actions tab (useful when a build job lost
+  # its runner, e.g. a macOS arm64 pool blip). The [release] guard is
+  # bypassed for dispatch: the "Create release" job tolerates an
+  # existing release and asset uploads clobber, so re-runs are safe.
+  workflow_dispatch:
 
 permissions:
   contents: write
