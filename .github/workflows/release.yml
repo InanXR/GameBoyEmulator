@@ -117,7 +117,7 @@ jobs:
           # from github.com (same host the checkout uses) instead of the
           # cli.github.com apt feed, which is not reliably reachable from
           # containers.
-          GH_TAG=$(curl -fsSL -o /dev/null -w '%{url_tag}' https://github.com/cli/cli/releases/latest)
+          GH_TAG=$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/cli/cli/releases/latest)
           GH_VERSION=${GH_TAG#*/v}
           curl -fsSL -o /tmp/gh.deb \
             "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.deb"
