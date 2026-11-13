@@ -106,6 +106,7 @@ jobs:
     container: ubuntu:22.04
     env:
       TAG: ${{ needs.release.outputs.tag }}
+      RELEASE_ID: ${{ needs.release.outputs.release_id }}
     steps:
       - uses: actions/checkout@v5
 
@@ -113,16 +114,8 @@ jobs:
         shell: bash
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends build-essential cmake libsdl2-dev curl ca-certificates
-          # gh is not in the 22.04 archive. Pull the release .deb straight
-          # from github.com (same host the checkout uses) instead of the
-          # cli.github.com apt feed, which is not reliably reachable from
-          # containers.
-          GH_TAG=$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/cli/cli/releases/latest)
-          GH_VERSION=${GH_TAG#*/v}
-          curl -fsSL -o /tmp/gh.deb \
-            "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.deb"
-          apt-get install -y /tmp/gh.deb
+          apt-get install -y --no-install-recommends \
+            build-essential cmake libsdl2-dev curl ca-certificates jq
 
       - name: Build
         # Container steps run under sh (dash) by default; this step
@@ -154,11 +147,34 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp README.md build/
-          ASSET="GameBoyEmulator-${TAG}-Linux-x64.tar.gz"
-          tar -czf "$ASSET" -C build gameboy README.md
-          # --clobber replaces an existing asset, so re-runs are safe
-          gh release upload "$TAG" "$ASSET" --clobber
+          set -o pipefail
+          {
+            cp README.md build/
+            ASSET="GameBoyEmulator-${TAG}-Linux-x64.tar.gz"
+            tar -czf "$ASSET" -C build gameboy README.md
+            # Clobber: delete an existing asset of the same name first,
+            # then upload. Pure REST via curl + jq (no gh in the
+            # container; this is the path that already worked here).
+            AID=$(curl -sf -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" \
+              | jq -r ".[] | select(.name == \"$ASSET\") | .id")
+            if [ -n "$AID" ]; then
+              curl -sf -X DELETE -H "Authorization: Bearer $GH_TOKEN" \
+                "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/$AID"
+            fi
+            curl -sf --retry 3 -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@$ASSET" \
+              "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${ASSET}"
+          } 2>&1 | tee package.log
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            cat package.log | while IFS= read -r line; do
+              printf '::error::%s\n' "${line:0:180}"
+            done
+          fi
+          exit "$rc"
 
   windows:
     name: Build Windows x64
