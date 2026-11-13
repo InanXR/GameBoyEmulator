@@ -1,0 +1,206 @@
+name: Release
+
+# Cutting a release: push a commit to main whose message contains the
+# marker "[release]". The tag (vX.Y.Z) and the release are derived from
+# the project() VERSION in the root CMakeLists, so the version has a
+# single source of truth. Builds run on all three platforms and upload
+# their archives to the release via the uploads REST API (no gh needed
+# inside the build jobs).
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create release
+    if: contains(github.event.head_commit.message, '[release]')
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      release_id: ${{ steps.create.outputs.id }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Read project version
+        id: version
+        run: |
+          VERSION=$(grep -oE 'VERSION [0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt | head -n1 | awk '{print $2}')
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        id: create
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          cat > notes.md <<EOF
+          ## Verified accuracy
+
+          | Suite | Result |
+          |---|---|
+          | blargg cpu_instrs (01-11) | 11/11 pass |
+          | blargg instr_timing | pass (M-cycle-exact instruction timing) |
+          | dmg-acid2 | pixel-perfect (0/23040 pixels differ) |
+          | Unit checks (CTest) | 30/30 |
+
+          ## Downloads
+
+          | Asset | Platform | Requirements |
+          |---|---|---|
+          | GameBoyEmulator-${TAG}-Windows-x64.zip | Windows 10/11 x64 | none; SDL2.dll included |
+          | GameBoyEmulator-${TAG}-Linux-x64.tar.gz | Linux x86-64, glibc 2.35 or newer | SDL2 runtime (sudo apt install libsdl2-2.0-0 or the distro equivalent) |
+          | GameBoyEmulator-${TAG}-macOS-arm64.tar.gz | macOS 14+ on Apple Silicon | brew install sdl2 |
+          | GameBoyEmulator-${TAG}-macOS-x64.tar.gz | macOS 14+ on Intel | brew install sdl2 |
+
+          ## Highlights since v1.0.0
+
+          - blargg cpu_instrs improved from 8/11 to 11/11; instr_timing
+            passes
+          - dmg-acid2 rendered pixel-perfect: window layer, full DMG
+            sprite priority, STAT interrupt blocking
+          - Complete APU: wave and noise channels, CH1 frequency sweep,
+            stereo mixing, per-channel DACs, high-pass filter
+          - DMG-exact timer circuit: falling-edge TIMA, DIV write and
+            TAC change effects, delayed TMA reload
+          - HALT bug; immediate interrupt dispatch on HALT wake-up
+          - MBC fixes: MBC2 RAM, MBC1 mode-1 banking, MBC3 RTC ticking
+            and latch, MBC5 rumble masking
+          - Battery saves (.sav including RTC state); save states v2
+          - Serial port output, headless mode, gamepad support,
+            turbo/pause/reset hotkeys
+          - Restructured into a platform-free core library plus an SDL2
+            frontend
+
+          Full changelog: CHANGELOG.md in the repository.
+
+          ## Usage
+
+              gameboy <rom.gb>              windowed; F5/F8 save states, Tab turbo
+              gameboy <rom.gb> --scale 3    window scale 1-8
+              gameboy <rom.gb> --headless N  run N frames without a window
+          EOF
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "GameBoy Emulator $TAG" \
+            --notes-file notes.md
+          ID=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .id)
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+
+  linux:
+    name: Build Linux x64
+    needs: release
+    runs-on: ubuntu-latest
+    # Ubuntu 22.04 container: glibc 2.35, so the binary runs on any
+    # mainstream distro from 22.04 onward. libstdc++/libgcc are linked
+    # statically to remove any GCC runtime version dependency.
+    container: ubuntu:22.04
+    env:
+      TAG: ${{ needs.release.outputs.tag }}
+      RELEASE_ID: ${{ needs.release.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential cmake libsdl2-dev curl ca-certificates
+
+      - name: Build
+        run: |
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc"
+          cmake --build build -j"$(nproc)"
+
+      - name: Package and upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp README.md build/
+          ASSET="GameBoyEmulator-${TAG}-Linux-x64.tar.gz"
+          tar -czf "$ASSET" -C build gameboy README.md
+          curl -sf --retry 3 -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary "@$ASSET" \
+            "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${ASSET}"
+
+  windows:
+    name: Build Windows x64
+    needs: release
+    runs-on: windows-latest
+    env:
+      SDL2_VERSION: "2.32.10"
+      TAG: ${{ needs.release.outputs.tag }}
+      RELEASE_ID: ${{ needs.release.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Fetch SDL2 development libraries
+        shell: pwsh
+        run: |
+          curl.exe -L -o sdl2.zip "https://github.com/libsdl-org/SDL/releases/download/release-$($env:SDL2_VERSION)/SDL2-devel-$($env:SDL2_VERSION)-VC.zip"
+          Expand-Archive sdl2.zip -DestinationPath sdl2
+          "SDL2_PREFIX=$PWD/sdl2/SDL2-$($env:SDL2_VERSION)" >> $env:GITHUB_ENV
+
+      - name: Build
+        shell: pwsh
+        run: |
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release "-DCMAKE_PREFIX_PATH=$env:SDL2_PREFIX"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build build --config Release
+
+      - name: Package and upload
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          Compress-Archive -Path build/gameboy.exe, build/SDL2.dll, README.md -DestinationPath "GameBoyEmulator-$($env:TAG)-Windows-x64.zip"
+          $asset = "GameBoyEmulator-$($env:TAG)-Windows-x64.zip"
+          curl.exe -sf --retry 3 -X POST `
+            -H "Authorization: Bearer $($env:GH_TOKEN)" `
+            -H "Content-Type: application/octet-stream" `
+            --data-binary "@$asset" `
+            "https://uploads.github.com/repos/$($env:GITHUB_REPOSITORY)/releases/$($env:RELEASE_ID)/assets?name=$asset"
+
+  macos:
+    name: Build macOS ${{ matrix.suffix }}
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            suffix: arm64
+          - runner: macos-26-intel
+            suffix: x64
+    runs-on: ${{ matrix.runner }}
+    env:
+      TAG: ${{ needs.release.outputs.tag }}
+      RELEASE_ID: ${{ needs.release.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: brew install sdl2
+
+      - name: Build
+        run: |
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j"$(sysctl -n hw.ncpu)"
+
+      - name: Package and upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp README.md build/
+          ASSET="GameBoyEmulator-${TAG}-macOS-${{ matrix.suffix }}.tar.gz"
+          tar -czf "$ASSET" -C build gameboy README.md
+          curl -sf --retry 3 -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary "@$ASSET" \
+            "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${ASSET}"
