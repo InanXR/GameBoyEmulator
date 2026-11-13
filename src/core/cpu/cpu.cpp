@@ -162,7 +162,7 @@ void CPU::handleInterrupts(MMU& mmu) {
 
             // Jump to interrupt vector
             // VBlank: 0x40, LCD: 0x48, Timer: 0x50, Serial: 0x58, Joypad: 0x60
-            PC = 0x0040 + (i * 0x08);
+            PC = static_cast<u16>(0x0040 + i * 0x08);
 
             ime = false;      // Disable further interrupts
 

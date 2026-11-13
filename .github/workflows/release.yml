@@ -83,10 +83,16 @@ jobs:
               gameboy <rom.gb> --scale 3    window scale 1-8
               gameboy <rom.gb> --headless N  run N frames without a window
           EOF
-          gh release create "$TAG" \
-            --target "$GITHUB_SHA" \
-            --title "GameBoy Emulator $TAG" \
-            --notes-file notes.md
+          # Idempotent: a re-run with the same version reuses the
+          # existing release instead of failing on the duplicate tag.
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG already exists; reusing it."
+          else
+            gh release create "$TAG" \
+              --target "$GITHUB_SHA" \
+              --title "GameBoy Emulator $TAG" \
+              --notes-file notes.md
+          fi
           ID=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" --jq .id)
           echo "id=$ID" >> "$GITHUB_OUTPUT"
 
@@ -100,14 +106,20 @@ jobs:
     container: ubuntu:22.04
     env:
       TAG: ${{ needs.release.outputs.tag }}
-      RELEASE_ID: ${{ needs.release.outputs.release_id }}
     steps:
       - uses: actions/checkout@v5
 
       - name: Install dependencies
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends build-essential cmake libsdl2-dev curl ca-certificates
+          apt-get install -y --no-install-recommends build-essential cmake libsdl2-dev curl ca-certificates gnupg
+          # gh is not in the 22.04 archive; use the official apt feed.
+          curl -fsSL https://cli.github.com/packages/githubcli-keyring.gpg \
+            -o /usr/share/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+            > /etc/apt/sources.list.d/github-cli.list
+          apt-get update
+          apt-get install -y --no-install-recommends gh
 
       - name: Build
         run: |
@@ -122,11 +134,8 @@ jobs:
           cp README.md build/
           ASSET="GameBoyEmulator-${TAG}-Linux-x64.tar.gz"
           tar -czf "$ASSET" -C build gameboy README.md
-          curl -sf --retry 3 -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Content-Type: application/octet-stream" \
-            --data-binary "@$ASSET" \
-            "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${ASSET}"
+          # --clobber replaces an existing asset, so re-runs are safe
+          gh release upload "$TAG" "$ASSET" --clobber
 
   windows:
     name: Build Windows x64
@@ -135,7 +144,6 @@ jobs:
     env:
       SDL2_VERSION: "2.32.10"
       TAG: ${{ needs.release.outputs.tag }}
-      RELEASE_ID: ${{ needs.release.outputs.release_id }}
     steps:
       - uses: actions/checkout@v5
 
@@ -160,11 +168,8 @@ jobs:
         run: |
           Compress-Archive -Path build/gameboy.exe, build/SDL2.dll, README.md -DestinationPath "GameBoyEmulator-$($env:TAG)-Windows-x64.zip"
           $asset = "GameBoyEmulator-$($env:TAG)-Windows-x64.zip"
-          curl.exe -sf --retry 3 -X POST `
-            -H "Authorization: Bearer $($env:GH_TOKEN)" `
-            -H "Content-Type: application/octet-stream" `
-            --data-binary "@$asset" `
-            "https://uploads.github.com/repos/$($env:GITHUB_REPOSITORY)/releases/$($env:RELEASE_ID)/assets?name=$asset"
+          # --clobber replaces an existing asset, so re-runs are safe
+          gh release upload $env:TAG $asset --clobber
 
   macos:
     name: Build macOS ${{ matrix.suffix }}
@@ -180,7 +185,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env:
       TAG: ${{ needs.release.outputs.tag }}
-      RELEASE_ID: ${{ needs.release.outputs.release_id }}
     steps:
       - uses: actions/checkout@v5
 
@@ -199,8 +203,5 @@ jobs:
           cp README.md build/
           ASSET="GameBoyEmulator-${TAG}-macOS-${{ matrix.suffix }}.tar.gz"
           tar -czf "$ASSET" -C build gameboy README.md
-          curl -sf --retry 3 -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Content-Type: application/octet-stream" \
-            --data-binary "@$ASSET" \
-            "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${ASSET}"
+          # --clobber replaces an existing asset, so re-runs are safe
+          gh release upload "$TAG" "$ASSET" --clobber

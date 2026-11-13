@@ -599,8 +599,8 @@ void APU::generateSample() {
     if (nr51 & 0x80) left += a4;
     if (nr51 & 0x08) right += a4;
 
-    float vol_left = ((nr50 >> 4) & 0x07) + 1;
-    float vol_right = (nr50 & 0x07) + 1;
+    float vol_left = static_cast<float>(((nr50 >> 4) & 0x07) + 1);
+    float vol_right = static_cast<float>((nr50 & 0x07) + 1);
     left *= vol_left / 8.0f;
     right *= vol_right / 8.0f;
 

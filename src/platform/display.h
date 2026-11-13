@@ -1,5 +1,8 @@
 #pragma once
-#include <SDL2/SDL.h>
+// SDL headers are included as <SDL.h>: the SDL2::SDL2 target supplies
+// the correct include directory on every platform (the official VC
+// package keeps headers flat, distro/brew/vcpkg installs use SDL2/).
+#include <SDL.h>
 #include "core/common/types.h"
 #include "core/input/joypad.h"
 #include <array>
