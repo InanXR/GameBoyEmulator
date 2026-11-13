@@ -1,5 +1,5 @@
-# Build directories
-build/
+# Build directories (classic and CMake presets)
+build*/
 cmake-build-*/
 
 # IDE files
@@ -32,6 +32,13 @@ install_manifest.txt
 # Save states
 *.state
 quicksave.state
+
+# Battery saves
+*.sav
+
+# Test ROM downloads
+.test-roms/
+*.ppm
 
 # ROMs (don't commit copyrighted material)
 roms/*.gb

@@ -1,0 +1,47 @@
+{
+    "version": 3,
+    "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+    "configurePresets": [
+        {
+            "name": "debug",
+            "displayName": "Debug",
+            "description": "Symbols, no optimization",
+            "binaryDir": "${sourceDir}/build/debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "release",
+            "displayName": "Release",
+            "description": "Optimized build (default for day-to-day use)",
+            "binaryDir": "${sourceDir}/build/release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "release-accurate",
+            "displayName": "Release + accuracy suite",
+            "description": "Release build with the ROM-downloading accuracy suite registered in CTest",
+            "inherits": "release",
+            "cacheVariables": {
+                "GB_DOWNLOAD_TESTS": "ON"
+            }
+        }
+    ],
+    "buildPresets": [
+        { "name": "debug",           "configurePreset": "debug" },
+        { "name": "release",         "configurePreset": "release" },
+        { "name": "release-accurate", "configurePreset": "release-accurate" }
+    ],
+    "testPresets": [
+        {
+            "name": "release-accurate",
+            "configurePreset": "release-accurate",
+            "output": { "outputOnFailure": true }
+        }
+    ]
+}

@@ -1,0 +1,16 @@
+# Formatting rules for the codebase. Matches the existing style:
+# 4-space indents, attached braces, ~100 column limit, no include
+# reordering (include order is semantic: same-dir, core, then system).
+---
+Language: Cpp
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 100
+AccessModifierOffset: -4
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: Never
+SortIncludes: Never
+IncludeBlocks: Preserve
+PointerAlignment: Right
+DerivePointerAlignment: false
