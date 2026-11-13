@@ -110,6 +110,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Install dependencies
+        shell: bash
         run: |
           apt-get update
           apt-get install -y --no-install-recommends build-essential cmake libsdl2-dev curl ca-certificates
@@ -124,10 +125,21 @@ jobs:
           apt-get install -y /tmp/gh.deb
 
       - name: Build
+        # Container steps run under sh (dash) by default; this step
+        # uses bash-only pipefail/PIPESTATUS, so request bash explicitly.
+        shell: bash
         run: |
           set -o pipefail
           cmake -B build -S . -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc"
+            -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc" \
+            2>&1 | tee configure.log
+          cfg=${PIPESTATUS[0]}
+          if [ "$cfg" -ne 0 ]; then
+            tail -20 configure.log | while IFS= read -r line; do
+              printf '::error::%s\n' "${line:0:180}"
+            done
+            exit "$cfg"
+          fi
           cmake --build build -j"$(nproc)" 2>&1 | tee build.log
           rc=${PIPESTATUS[0]}
           if [ "$rc" -ne 0 ]; then
@@ -138,6 +150,7 @@ jobs:
           exit "$rc"
 
       - name: Package and upload
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
