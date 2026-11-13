@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [3.0.0] — 2026-11-13
 
+[Release v3.0.0](https://github.com/InanXR/GameBoyEmulator/releases/tag/v3.0.0)
+
 Full Game Boy Color support, verified pixel-perfect against the
 cgb-acid2 reference test, plus the first accurate STOP emulation.
 
