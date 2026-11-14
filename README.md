@@ -11,7 +11,7 @@ and cgb-acid2 reference images pixel-perfect.
 
 ![C++17](https://img.shields.io/badge/C++-17-00599C?logo=c%2B%2B)
 ![SDL2](https://img.shields.io/badge/SDL-2.0-green)
-![Tests](https://img.shields.io/badge/tests-14%2F14%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-15%2F15%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-orange)
 
 ## Contents
@@ -36,11 +36,11 @@ and cgb-acid2 reference images pixel-perfect.
 |---|---|
 | blargg `cpu_instrs` (01-11, all 11 ROMs) | pass |
 | blargg `instr_timing` | pass (M-cycle-exact instruction timing) |
+| blargg `mem_timing-2` | pass (T-cycle-precise memory access timing) |
 | `dmg-acid2` (mattcurrie) | pixel-perfect: 0 of 23040 pixels differ from the reference |
 | `cgb-acid2` (mattcurrie) | pixel-perfect: 0 of 23040 pixels differ, exact RGB |
 | blargg `halt_bug` survey ROM | runs to completion; halt-bug trigger matrix matches hardware |
 | Unit tests (timer edges, ALU flags, serial, joypad, CGB registers, HDMA, save states) | 99/99 |
-| blargg `mem_timing-2` | not passing; requires sub-M-cycle DIV phase modeling (see [11](#11-known-limitations)) |
 
 Headless throughput is roughly 16x real time on a modern desktop core.
 
@@ -119,7 +119,7 @@ else boots as a DMG, and `--dmg` forces DMG mode for any ROM.
 - **Display**: hardware-accelerated, integer-scaled, resizable window;
   fullscreen toggle; gamepad support
 - **Runtime controls**: turbo, pause, reset, volume, screenshots
-- **Test suite**: one command runs 14 ROM-based accuracy tests plus 99
+- **Test suite**: one command runs 15 ROM-based accuracy tests plus 99
   unit checks through CTest
 
 ## 3. Documentation
@@ -232,9 +232,9 @@ Keyboard and gamepad inputs are merged; both work simultaneously.
 ## 8. Testing
 
 The accuracy suite downloads freely redistributable test ROMs (blargg's
-`cpu_instrs`, `instr_timing`, `halt_bug`, and mattcurrie's `dmg-acid2`
-and `cgb-acid2`) into `.test-roms/` on first run, executes them headless,
-and verifies the results — including pixel-for-pixel framebuffer
+`cpu_instrs`, `instr_timing`, `mem_timing-2`, `halt_bug`, and mattcurrie's
+`dmg-acid2` and `cgb-acid2`) into `.test-roms/` on first run, executes them
+headless, and verifies the results — including pixel-for-pixel framebuffer
 comparisons against both acid2 reference images. Details in
 [docs/04-Testing](docs/04-TESTING.md).
 
@@ -252,8 +252,9 @@ PASS  instr_timing.gb
 INFO  halt_bug.gb (no verdict; survey ROM ran to completion)
 PASS  dmg-acid2.gb (pixel-perfect)
 PASS  cgb-acid2.gbc (pixel-perfect, exact RGB)
+PASS  mem_timing-2.gb (read/write/modify access timing)
 ==============================================
- Results: 14 passed, 0 failed
+ Results: 15 passed, 0 failed
  All tests passed!
 ```
 
@@ -320,9 +321,6 @@ GameBoyEmulator/
 
 ## 11. Known limitations
 
-- blargg `mem_timing-2` does not pass: it requires modeling the exact
-  T-cycle within each M-cycle at which DIV advances relative to memory
-  accesses. The architecture is M-cycle granular by design.
 - CGB HBlank DMA moves each 16-byte block instantly at HBlank entry
   rather than stalling the CPU for the hardware's ~8 M-cycles per
   block; GDMA is likewise atomic. Data placement and completion flags
@@ -331,9 +329,12 @@ GameBoyEmulator/
   rendering (the DIV freeze is emulated on both models).
 - No link cable: the serial port is loopback-to-host only.
 - No debugger or cheat-code interface.
+- The DIV-APU coupling (DIV writes clocking the sound frame sequencer)
+  is modeled by rate, not by the real falling-edge path, so blargg's
+  `dmg_sound` and mooneye-grade T-cycle timer tests are out of reach
+  without a finer bus model.
 
-Planned: rewind, link-cable-over-network, debugger, sub-M-cycle DIV
-phase accuracy.
+Planned: rewind, link-cable-over-network, debugger.
 
 ## 12. References
 

@@ -149,8 +149,10 @@ of dmg-acid2 (per-line LCDC/WX rewrites via LYC interrupts) work.
 
 The hook fires at M-cycle granularity. Within an M-cycle, the exact
 T-cycle at which DIV's edge occurs relative to the memory access is
-not modeled. That is the (documented) reason blargg's `mem_timing-2`
-does not pass — see [05-Accuracy §3](05-ACCURACY.md#3-known-limitations).
+not modeled. blargg's `mem_timing-2` nevertheless passes at this
+granularity (see [05-Accuracy §2.5](05-ACCURACY.md#25-mem_timing-2-passes-at-m-cycle-granularity));
+what genuinely needs T-cycle modeling is the DIV-APU falling-edge
+coupling (blargg `dmg_sound`) and mooneye-grade timer edge tests.
 
 ## 4. Main Loop & Frame Pacing
 

@@ -4,6 +4,25 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **mem_timing-2 actually passes — the "not passing" claim was never
+  tested.** Running blargg's real suite shows all three tests (read,
+  write, and read-modify-write access timing) passing on both DMG and
+  CGB models. The ROMs print nothing over serial (the newer blargg
+  framework parks with the verdict in battery RAM), which had made an
+  unrun suite look like a hang. mem_timing-2 is now a permanent
+  member of the accuracy suite (15 tests), with the script reading
+  the verdict back from the emulator's .sav file, and the accuracy
+  matrix, limitations and architecture docs are corrected: the
+  M-cycle-granular lockstep design resolves every access/edge
+  alignment the suite probes. What still genuinely requires
+  sub-M-cycle modeling is documented instead: the DIV-APU
+  falling-edge coupling (blargg `dmg_sound`) and mooneye-grade
+  T-cycle timer tests.
+
 ## [3.0.0] — 2026-11-13
 
 [Release v3.0.0](https://github.com/InanXR/GameBoyEmulator/releases/tag/v3.0.0)

@@ -256,6 +256,61 @@ PYEOF
 
 run_cgb_acid2
 
+# mem_timing-2: memory access timing at T-cycle resolution (reads,
+# writes, and read-modify-write instructions vs. a 64-cycle TIMA tick).
+#
+# The newer blargg framework does not print over serial: it parks with
+# the verdict in battery-backed cartridge RAM - a result byte at $A000
+# (0 = passed), the signature $DE $B0 $61 at $A001-$A003 and the text
+# report at $A004. The emulator persists that SRAM as a .sav next to
+# the ROM (GBSAV01 container), so the script parses the save file.
+run_mem_timing2() {
+    if ! download "mem_timing-2.gb" \
+        "https://raw.githubusercontent.com/retrio/gb-test-roms/master/mem_timing-2/mem_timing.gb"; then
+        echo "SKIP  mem_timing-2 (download failed)"
+        return
+    fi
+
+    local sav="$ROM_DIR/mem_timing-2.sav"
+    rm -f "$sav"
+    timeout 300 "$EMU" "$ROM_DIR/mem_timing-2.gb" --headless 4000 >/dev/null 2>&1
+
+    python3 - "$sav" <<'PYEOF'
+import sys
+try:
+    with open(sys.argv[1], 'rb') as f:
+        data = f.read()
+except OSError:
+    print("FAIL  mem_timing-2.gb (no battery save written - crashed?)")
+    sys.exit(1)
+if data[:7] != b'GBSAV01':
+    print("FAIL  mem_timing-2.gb (unrecognized save container)")
+    sys.exit(1)
+ram = data[11:]
+if ram[1:4] != b'\xde\xb0\x61':
+    print("FAIL  mem_timing-2.gb (framework signature missing)")
+    sys.exit(1)
+if ram[0] != 0:
+    print(f"FAIL  mem_timing-2.gb (result code {ram[0]})")
+    sys.exit(1)
+text = ram[4:0x600].split(b'\x00')[0].decode('ascii', 'replace')
+if 'Passed' in text:
+    print("PASS  mem_timing-2.gb (read/write/modify access timing)")
+    sys.exit(0)
+print("FAIL  mem_timing-2.gb (no Passed verdict)")
+sys.exit(1)
+PYEOF
+    if [[ $? -eq 0 ]]; then
+        PASS=$((PASS + 1))
+    else
+        FAIL=$((FAIL + 1))
+        FAILED_TESTS+=("mem_timing-2.gb")
+    fi
+    rm -f "$sav"
+}
+
+run_mem_timing2
+
 echo "=============================================="
 echo " Results: $PASS passed, $FAIL failed"
 if [[ $FAIL -gt 0 ]]; then

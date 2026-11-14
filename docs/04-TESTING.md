@@ -89,6 +89,11 @@ from the freely redistributable sources into `.test-roms/` (or
   map attributes, sprite palettes/banks, priority modes and HBlank DMA.
   Same procedure, compared in exact RGB using the reference image's
   documented 5-to-8-bit conversion `(v << 3) | (v >> 2)`.
+- **mem_timing-2** — memory access timing (read, write, read-modify-write)
+  probed against a 64-cycle TIMA tick. The newer blargg framework does
+  not print over serial; it parks with the verdict in battery RAM
+  (result byte at $A000, signature $DEB061, text at $A004), which the
+  script reads back out of the emulator's .sav file.
 - **halt_bug.gb** — a survey ROM with no pass/fail verdict; the script
   verifies it runs to completion and reports it as `INFO`.
 
@@ -106,8 +111,9 @@ PASS  instr_timing.gb
 INFO  halt_bug.gb (no verdict; survey ROM ran to completion)
 PASS  dmg-acid2.gb (pixel-perfect)
 PASS  cgb-acid2.gbc (pixel-perfect, exact RGB)
+PASS  mem_timing-2.gb (read/write/modify access timing)
 ==============================================
- Results: 14 passed, 0 failed
+ Results: 15 passed, 0 failed
  All tests passed!
 ```
 
@@ -139,10 +145,10 @@ mysterious emulator crash.
 
 1. **Build matrix** — Ubuntu, macOS, Windows (vcpkg), Release builds.
 2. **Accuracy job** — Ubuntu: builds, runs `ctest` and
-   `tests/run_tests.sh`; the full 14-test suite must stay green.
+   `tests/run_tests.sh`; the full 15-test suite must stay green.
 
 Keep CI green: if a change intentionally alters timing or rendering,
-expect `instr_timing` or `dmg-acid2` to fail *only if accuracy
+expect `instr_timing`, `dmg-acid2` or `mem_timing-2` to fail *only if accuracy
 regressed* — both are hard requirements, not aspirations.
 
 ## 6. Adding New Tests

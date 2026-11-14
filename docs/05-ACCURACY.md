@@ -19,8 +19,8 @@ What is verified, how, and where the known limits are.
 | `dmg-acid2` | PPU rendering (window, sprite priority, STAT choreography) | **pixel-perfect** (0/23040 px differ) | `tests/run_tests.sh` |
 | `halt_bug.gb` | HALT-bug trigger matrix over IE/IF | runs to completion; matrix matches hardware expectations | `tests/run_tests.sh` (INFO) |
 | `cgb-acid2` | CGB PPU rendering (palettes, attributes, banks, priority, HDMA) | **pixel-perfect** (0/23040 px, exact RGB) | `tests/run_tests.sh` |
+| blargg `mem_timing-2` | T-cycle-precise memory access timing (read, write, modify) | **pass** (verdict read from the ROM's battery RAM) | `tests/run_tests.sh` |
 | Unit tests | Timer edges, CPU flags, serial, joypad, CGB registers/banking/HDMA/speed, save states | **99/99 pass** | `ctest` |
-| blargg `mem_timing-2` | T-cycle-precise memory access timing | **not passing** (see §3.1) | manual |
 | blargg `dmg_sound` / `cgb_sound` | APU register-level behavior | not run | — |
 | Blargg `oam_bug` | OAM corruption bug | not implemented, not run | — |
 
@@ -75,38 +75,50 @@ the DMG behavior described by Gekkio (the interrupt-controller lines
 only exist for bits 0–4, so upper IF/IE bits alone must not trigger
 it).
 
-### 2.5 mem_timing-2 (the failing stretch goal)
+### 2.5 mem_timing-2 (passes at M-cycle granularity)
 
-These ROMs time memory accesses against DIV to T-cycle resolution.
-Passing would require modeling *which of the four T-cycles inside each
-M-cycle* contains the DIV increment edge relative to the memory
-access, plus the exact OAM/VRAM bus contention of mode 3. The current
-architecture is M-cycle granular by design (see
-[02-Architecture §3.3](02-ARCHITECTURE.md#33-what-is-deliberately-not-modeled)).
-No commercial game depends on this precision; it remains the single
-largest accuracy gap and the main reason a pixel-FIFO PPU rewrite would
-be the next big step.
+These ROMs time memory accesses against a 64-cycle TIMA tick to
+T-cycle resolution, using sync loops that walk the access phase in
+1-cycle steps. They were long documented here as "not passing" on the
+assumption that M-cycle-granular timing could not resolve them — an
+assumption that had never actually been tested. Running the suite for
+real shows all three tests (read, write, modify timing) passing on
+both DMG and CGB models: the sync loops converge on M-cycle phases,
+and every access/edge alignment the suite probes resolves correctly
+in the lockstep design.
+
+The verdict is not printed over serial: the newer blargg framework
+parks with the result in battery-backed cartridge RAM (result byte at
+`$A000`, signature `$DEB061`, text report at `$A004`), which the
+test script reads back from the emulator's `.sav` file.
+
+What genuinely remains out of reach without sub-M-cycle modeling is
+the DIV-APU coupling (DIV writes clocking the sound frame sequencer
+early — blargg `dmg_sound`) and mooneye-grade T-cycle timer edge
+tests; no commercial game depends on either.
 
 ## 3. Known Limitations
 
-1. **`mem_timing-2`** does not pass (see §2.5) — sub-M-cycle DIV phase
-   is not modeled.
-2. **CGB DMA billing** — GDMA and HBlank DMA transfers are
+1. **CGB DMA billing** — GDMA and HBlank DMA transfers are
    instantaneous; hardware stalls the CPU ~8 M-cycles per 16-byte
    block. Data placement, readback and completion flags are correct,
    but the CPU is not charged the transfer time.
-3. **DMG STOP LCD-off** — hardware blanks the LCD during STOP; the
+2. **DMG STOP LCD-off** — hardware blanks the LCD during STOP; the
    emulator keeps rendering (the DIV freeze is emulated).
-4. **No link cable** — the serial port is loopback-to-host only
+3. **No link cable** — the serial port is loopback-to-host only
    (sufficient for test ROMs; no Game Link network play).
-5. **OAM corruption bug** (writing OAM during mode 1/2 corrupts
+4. **OAM corruption bug** (writing OAM during mode 1/2 corrupts
    sprite data on real DMG) is not emulated — writes simply take
    effect.
-6. **Wave RAM trigger corruption** (DMG wave-RAM clobber when
+5. **Wave RAM trigger corruption** (DMG wave-RAM clobber when
    retriggering CH3 mid-read) is not emulated.
-7. **Mode 3 length is fixed** at 172 T-cycles — real hardware varies
+6. **Mode 3 length is fixed** at 172 T-cycles — real hardware varies
    it with sprite/scroll load; line-based renderers like this one
    don't need the variation for any known game.
+7. **DIV-APU is rate-modeled**, not edge-coupled: the frame sequencer
+   advances at the correct 512 Hz, but a DIV write does not send a
+   real falling-edge pulse into it (blargg `dmg_sound` and mooneye
+   T-cycle timer tests would require that plus sub-M-cycle phases).
 8. **The 11 illegal opcodes** execute as NOPs with reasonable timing,
    rather than locking up the CPU as some hardware revisions do.
 
